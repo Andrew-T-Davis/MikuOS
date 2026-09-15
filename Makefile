@@ -1,14 +1,20 @@
 NASM := nasm
 NASM_ARG := -f bin
 
-HOLY_MIKU_FILES_DIR = ./UserHolyMikuFilesDir/
-HOLY_MIKU_FILES := $(shell find $(HOLY_MIKU_FILES_DIR) -type f)
+HOLY_MIKU_FILES_DIR = ./UserHolyMikuFilesDir
+HOLY_MIKU_FILES := $(shell find $(HOLY_MIKU_FILES_DIR)/ -type f)
 
 bootloader.bin: bootloader.asm
 	$(NASM) $(NASM_ARG) -o $@ $<
 
-UserFiles.Bin: PackFiles.py $(HOLY_MIKU_FILES)
-	python3 PackFiles.py $(HOLY_MIKU_FILES_DIR) UserFiles.Bin
+seed/HolyMikuSeed: seed/ast.c seed/asm.c seed/main.c seed/grammar.c seed/codegen.c 
+	clang -O3 seed/ast.c seed/asm.c seed/main.c seed/grammar.c seed/codegen.c -o seed/HolyMikuSeed
+
+0000Kernel.BIN.HM: seed/Kernel.hm seed/HolyMikuSeed
+	seed/HolyMikuSeed seed/Kernel.hm $(HOLY_MIKU_FILES_DIR)/0000Kernel.BIN.HM
+
+UserFiles.Bin: PackFiles.py $(HOLY_MIKU_FILES) 0000Kernel.BIN.HM
+	python3 PackFiles.py $(HOLY_MIKU_FILES_DIR)/ UserFiles.Bin
 
 MikuOS.img: bootloader.bin UserFiles.Bin
 	rm -f MikuOS.img

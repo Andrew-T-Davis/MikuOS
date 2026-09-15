@@ -14,6 +14,9 @@ _start:
     mov sp, 0x7C00
     mov bp, 0x7C00
 
+    mov ax,0x0012
+    int 0x10
+
     push dx
     mov al, 'B'
     mov dx, 0x3F8

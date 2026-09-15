@@ -677,6 +677,11 @@ static Node* ParseAsm(void) {
 static Node* ParseStmt(void) {
     if (!rwptCur) return NULL;
 
+    if (rwptCur->rwullType == TOK_SEMI) {
+        rwptCur = rwptCur->rwptNext;
+        return NodeNew(NODE_BLOCK);
+    }
+    
     if (rwptCur->rwullType == TOK_ASM_OP) return ParseAsm();
     if (rwptCur->rwullType == TOK_KW_STRUCT) return ParseAggregateDef(NODE_STRUCT_DEF);
     if (rwptCur->rwullType == TOK_KW_UNION) return ParseAggregateDef(NODE_UNION_DEF);

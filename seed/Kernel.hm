@@ -1,4 +1,5 @@
 Func U64 main(){
+    U8* VGAFont = 0xFFA6E;
     U64 LoopTime=5;
     Loop5TimeOut0:
     LoopTime=LoopTime-1;
@@ -11,6 +12,58 @@ Func U64 main(){
     POPQ QAX;
     If (LoopTime>0) Goto Loop5TimeOut0;
     U8* VGA=0xA0000;
-    VGA[0]=0xFF;
+    HM_Out3F8(0xA);Print3F8("Hello Wolrd");HM_Out3F8(0xA);
+    PrintVGA("MikuOS v0.001",0,0);
+    PrintVGA("By Andrew T. Davis",0,8);
+
     While (1);
+    Return;
+}
+
+Func U0 HM_OutB(U16 Port, U8 Value){
+    PUSHQ QDX;
+    PUSHQ QAX;
+    MOVW WDX, [Port];
+    MOVB BAL, [Value];
+    OUTB WDX, BAL;
+    POPQ QAX;
+    POPQ QDX;
+    Return;
+}
+
+Func U0 HM_Out3F8(U8 Value){
+    PUSHQ QAX;
+    PUSHQ QDX;
+    MOVW WDX, 0x3F8;
+    MOVB BAL, [Value];
+    OUTB WDX, BAL;
+    POPQ QDX;
+    POPQ QAX;
+    Return;
+}
+
+Func U0 Print3F8(U8* String){
+    While (*String) {
+        HM_Out3F8(*String);
+        String = String + 1;
+    }
+    Return;
+}
+
+Func U0 PrintVGA(U8* String, U16 X, U16 Y){
+    While (*String) {
+        U8* CharROM = 0xFFA6E + ((*String) * 8);
+        U8* VRAM = 0xA0000;
+        VRAM[((Y+0)*(640/8))+X]=CharROM[0];
+        VRAM[((Y+1)*(640/8))+X]=CharROM[1];
+        VRAM[((Y+2)*(640/8))+X]=CharROM[2];
+        VRAM[((Y+3)*(640/8))+X]=CharROM[3];
+        VRAM[((Y+4)*(640/8))+X]=CharROM[4];
+        VRAM[((Y+5)*(640/8))+X]=CharROM[5];
+        VRAM[((Y+6)*(640/8))+X]=CharROM[6];
+        VRAM[((Y+7)*(640/8))+X]=CharROM[7];
+        X = X + 1;
+        String = String + 1;
+    }
+    Return;
 }

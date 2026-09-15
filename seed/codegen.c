@@ -104,7 +104,7 @@ static void AddRaxRcx(CodeBuf* rwpcbCodeBuf) { E8(rwpcbCodeBuf, 0x48); E8(rwpcbC
 static void SubRaxRcx(CodeBuf* rwpcbCodeBuf) { E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x29); E8(rwpcbCodeBuf, 0xC8); }
 static void ImulRaxRcx(CodeBuf* rwpcbCodeBuf) { E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x0F); E8(rwpcbCodeBuf, 0xAF); E8(rwpcbCodeBuf, 0xC1); }
 static void IdivRcx(CodeBuf* rwpcbCodeBuf) { E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x99); E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0xF7); E8(rwpcbCodeBuf, 0xF9); }
-static void CmpRaxRcx(CodeBuf* rwpcbCodeBuf) { E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x39); E8(rwpcbCodeBuf, 0xC8); }
+static void CmpRaxRcx(CodeBuf* rwpcbCodeBuf) { E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x39); E8(rwpcbCodeBuf, 0xC1); }
 static void NegRax(CodeBuf* rwpcbCodeBuf) { E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0xF7); E8(rwpcbCodeBuf, 0xD8); }
 static void MovRspRbp(CodeBuf* rwpcbCodeBuf) { E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x89); E8(rwpcbCodeBuf, 0xEC); }
 static void PopRbp(CodeBuf* rwpcbCodeBuf) { E8(rwpcbCodeBuf, 0x5D); }
@@ -426,56 +426,6 @@ static U64 StructFieldOffsetRecursive(Node* rwpnNode) {
     return rwullOffset;
 }
 
-static void GenLValue(CodeBuf* rwpcbCodeBuf, Node* rwpnNode) {
-    if (rwpnNode->rwullType == NODE_VAR) {
-        Symbol* rwpsSymbol = SymFindLocal(rwpnNode->rwszName);
-        if (!rwpsSymbol) rwpsSymbol = SymFindGlobal(rwpnNode->rwszName);
-        if (!rwpsSymbol) return;
-        GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
-    } else if (rwpnNode->rwullType == NODE_INDEX) {
-        GenLValue(rwpcbCodeBuf, rwpnNode->rwpnLeft);
-        PushRax(rwpcbCodeBuf);
-        GenNode(rwpcbCodeBuf, rwpnNode->rwpnRight);
-        PopRcx(rwpcbCodeBuf);
-        U64 rwullElemSize = 8;
-        if (rwpnNode->rwpnLeft->rwullType == NODE_VAR) {
-            Symbol* rwpsSymbol = SymFindLocal(rwpnNode->rwpnLeft->rwszName);
-            if (!rwpsSymbol) rwpsSymbol = SymFindGlobal(rwpnNode->rwpnLeft->rwszName);
-            if (rwpsSymbol) rwullElemSize = SymbolElemSize(rwpsSymbol);
-        } else if (rwpnNode->rwpnLeft->rwullType == NODE_STRUCT_ACCESS ||
-                   rwpnNode->rwpnLeft->rwullType == NODE_STRUCT_PTR_ACCESS) {
-            StructField* rwpsfField = StructFieldOf(rwpnNode->rwpnLeft);
-            if (rwpsfField) {
-                if (rwpsfField->rwullPtrDepth) rwullElemSize = 8;
-                else if (rwpsfField->rwullStructId && rwpsfField->rwszStructName) {
-                    rwullElemSize = StructSize(rwpsfField->rwszStructName);
-                } else {
-                    rwullElemSize = TypeSize(rwpsfField->rwullVarType);
-                    if (rwullElemSize == 0) rwullElemSize = 8;
-                }
-            }
-        }
-        U64 rwullShift = Log2Ceil(rwullElemSize);
-        if (rwullShift) ShlRaxImm(rwpcbCodeBuf, (U8)rwullShift);
-        AddRaxRcx(rwpcbCodeBuf);
-    } else if (rwpnNode->rwullType == NODE_DEREF) {
-        GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft);
-    } else if (rwpnNode->rwullType == NODE_STRUCT_ACCESS || rwpnNode->rwullType == NODE_STRUCT_PTR_ACCESS) {
-        if (rwpnNode->rwullType == NODE_STRUCT_PTR_ACCESS) {
-            GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft);
-        } else {
-            GenLValue(rwpcbCodeBuf, rwpnNode->rwpnLeft);
-        }
-        U64 rwullOffset = StructFieldOffsetRecursive(rwpnNode);
-        if (rwullOffset) {
-            PushRax(rwpcbCodeBuf);
-            MovRaxImm(rwpcbCodeBuf, rwullOffset);
-            PopRcx(rwpcbCodeBuf);
-            AddRaxRcx(rwpcbCodeBuf);
-        }
-    }
-}
-
 static void GenLoad(CodeBuf* rwpcbCodeBuf, U64 rwullSize, int rwullIsSigned) {
     if (rwullSize == 1) {
         if (rwullIsSigned) { E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x0F); E8(rwpcbCodeBuf, 0xBE); }
@@ -501,6 +451,67 @@ static void GenStore(CodeBuf* rwpcbCodeBuf, U64 rwullSize) {
     else { E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x89); E8(rwpcbCodeBuf, 0x01); }
 }
 
+static void GenLValue(CodeBuf* rwpcbCodeBuf, Node* rwpnNode) {
+    if (rwpnNode->rwullType == NODE_VAR) {
+        Symbol* rwpsSymbol = SymFindLocal(rwpnNode->rwszName);
+        if (!rwpsSymbol) rwpsSymbol = SymFindGlobal(rwpnNode->rwszName);
+        if (!rwpsSymbol) return;
+        GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
+    } else if (rwpnNode->rwullType == NODE_INDEX) {
+        Node* rwpnBase = rwpnNode->rwpnLeft;
+        while (rwpnBase && rwpnBase->rwullType == NODE_INDEX) rwpnBase = rwpnBase->rwpnLeft;
+        Symbol* rwpsBase = NULL;
+        if (rwpnBase && rwpnBase->rwullType == NODE_VAR) {
+            rwpsBase = SymFindLocal(rwpnBase->rwszName);
+            if (!rwpsBase) rwpsBase = SymFindGlobal(rwpnBase->rwszName);
+        }
+
+        int rwullIsPtr = rwpsBase && rwpsBase->rwullPtrDepth > 0 && rwpsBase->rwullArraySize == 0;
+
+        if (rwullIsPtr) {
+            GenVarAddr(rwpcbCodeBuf, rwpsBase);
+            GenLoad(rwpcbCodeBuf, 8, 0);
+        } else {
+            GenLValue(rwpcbCodeBuf, rwpnNode->rwpnLeft);
+        }
+        PushRax(rwpcbCodeBuf);
+        GenNode(rwpcbCodeBuf, rwpnNode->rwpnRight);
+        PopRcx(rwpcbCodeBuf);
+
+        U64 rwullElemSize = 8;
+        if (rwpsBase) {
+            if (rwpsBase->rwullPtrDepth > 0) {
+                if (rwpsBase->rwullStructId && rwpsBase->rwszStructName)
+                    rwullElemSize = StructSize(rwpsBase->rwszStructName);
+                else {
+                    rwullElemSize = TypeSize(rwpsBase->rwullVarType);
+                    if (rwullElemSize == 0) rwullElemSize = 8;
+                }
+            } else {
+                rwullElemSize = SymbolElemSize(rwpsBase);
+            }
+        }
+        U64 rwullShift = Log2Ceil(rwullElemSize);
+        if (rwullShift) ShlRaxImm(rwpcbCodeBuf, (U8)rwullShift);
+        AddRaxRcx(rwpcbCodeBuf);
+    } else if (rwpnNode->rwullType == NODE_DEREF) {
+        GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft);
+    } else if (rwpnNode->rwullType == NODE_STRUCT_ACCESS || rwpnNode->rwullType == NODE_STRUCT_PTR_ACCESS) {
+        if (rwpnNode->rwullType == NODE_STRUCT_PTR_ACCESS) {
+            GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft);
+        } else {
+            GenLValue(rwpcbCodeBuf, rwpnNode->rwpnLeft);
+        }
+        U64 rwullOffset = StructFieldOffsetRecursive(rwpnNode);
+        if (rwullOffset) {
+            PushRax(rwpcbCodeBuf);
+            MovRaxImm(rwpcbCodeBuf, rwullOffset);
+            PopRcx(rwpcbCodeBuf);
+            AddRaxRcx(rwpcbCodeBuf);
+        }
+    }
+}
+
 static void GenCopyRaxRcx(CodeBuf* rwpcbCodeBuf, U64 rwullBytes) {
     U64 rwull8 = rwullBytes / 8;
     U64 rwull1 = rwullBytes % 8;
@@ -522,12 +533,25 @@ static U64 LValueTypeSize(Node* rwpnNode) {
     if (rwpnNode->rwullType == NODE_VAR) {
         Symbol* rwpsSymbol = SymFindLocal(rwpnNode->rwszName);
         if (!rwpsSymbol) rwpsSymbol = SymFindGlobal(rwpnNode->rwszName);
-        if (rwpsSymbol) return rwpsSymbol->rwullPtrDepth ? 8 : SymbolElemSize(rwpsSymbol);
+        if (rwpsSymbol) {
+            if (rwpsSymbol->rwullPtrDepth > 0) return 8;
+            if (rwpsSymbol->rwullStructId && rwpsSymbol->rwszStructName)
+                return StructSize(rwpsSymbol->rwszStructName);
+            return SymbolElemSize(rwpsSymbol);
+        }
     } else if (rwpnNode->rwullType == NODE_INDEX) {
         if (rwpnNode->rwpnLeft->rwullType == NODE_VAR) {
             Symbol* rwpsSymbol = SymFindLocal(rwpnNode->rwpnLeft->rwszName);
             if (!rwpsSymbol) rwpsSymbol = SymFindGlobal(rwpnNode->rwpnLeft->rwszName);
-            if (rwpsSymbol) return SymbolElemSize(rwpsSymbol);
+            if (rwpsSymbol) {
+                if (rwpsSymbol->rwullPtrDepth > 0) {
+                    if (rwpsSymbol->rwullStructId && rwpsSymbol->rwszStructName)
+                        return StructSize(rwpsSymbol->rwszStructName);
+                    U64 rwullSz = TypeSize(rwpsSymbol->rwullVarType);
+                    return rwullSz ? rwullSz : 8;
+                }
+                return SymbolElemSize(rwpsSymbol);
+            }
         }
         if (rwpnNode->rwpnLeft->rwullType == NODE_STRUCT_ACCESS ||
             rwpnNode->rwpnLeft->rwullType == NODE_STRUCT_PTR_ACCESS) {
@@ -541,6 +565,17 @@ static U64 LValueTypeSize(Node* rwpnNode) {
             }
         }
     } else if (rwpnNode->rwullType == NODE_DEREF) {
+        Node* rwpnInner = rwpnNode->rwpnLeft;
+        if (rwpnInner && rwpnInner->rwullType == NODE_VAR) {
+            Symbol* rwpsSymbol = SymFindLocal(rwpnInner->rwszName);
+            if (!rwpsSymbol) rwpsSymbol = SymFindGlobal(rwpnInner->rwszName);
+            if (rwpsSymbol && rwpsSymbol->rwullPtrDepth > 0) {
+                if (rwpsSymbol->rwullStructId && rwpsSymbol->rwszStructName)
+                    return StructSize(rwpsSymbol->rwszStructName);
+                U64 rwullSz = TypeSize(rwpsSymbol->rwullVarType);
+                return rwullSz ? rwullSz : 8;
+            }
+        }
         return 8;
     } else if (rwpnNode->rwullType == NODE_STRUCT_ACCESS || rwpnNode->rwullType == NODE_STRUCT_PTR_ACCESS) {
         StructField* rwpsfField = StructFieldOf(rwpnNode);
@@ -565,13 +600,25 @@ static int LValueTypeSigned(Node* rwpnNode) {
         if (rwpnNode->rwpnLeft->rwullType == NODE_VAR) {
             Symbol* rwpsSymbol = SymFindLocal(rwpnNode->rwpnLeft->rwszName);
             if (!rwpsSymbol) rwpsSymbol = SymFindGlobal(rwpnNode->rwpnLeft->rwszName);
-            if (rwpsSymbol) return TypeSigned(rwpsSymbol->rwullVarType);
+            if (rwpsSymbol) {
+                if (rwpsSymbol->rwullPtrDepth > 0) return TypeSigned(rwpsSymbol->rwullVarType);
+                return TypeSigned(rwpsSymbol->rwullVarType);
+            }
         }
         if (rwpnNode->rwpnLeft->rwullType == NODE_STRUCT_ACCESS ||
             rwpnNode->rwpnLeft->rwullType == NODE_STRUCT_PTR_ACCESS) {
             StructField* rwpsfField = StructFieldOf(rwpnNode->rwpnLeft);
             if (rwpsfField) return TypeSigned(rwpsfField->rwullVarType);
         }
+    } else if (rwpnNode->rwullType == NODE_DEREF) {
+        Node* rwpnInner = rwpnNode->rwpnLeft;
+        if (rwpnInner && rwpnInner->rwullType == NODE_VAR) {
+            Symbol* rwpsSymbol = SymFindLocal(rwpnInner->rwszName);
+            if (!rwpsSymbol) rwpsSymbol = SymFindGlobal(rwpnInner->rwszName);
+            if (rwpsSymbol && rwpsSymbol->rwullPtrDepth > 0)
+                return TypeSigned(rwpsSymbol->rwullVarType);
+        }
+        return 0;
     } else if (rwpnNode->rwullType == NODE_STRUCT_ACCESS || rwpnNode->rwullType == NODE_STRUCT_PTR_ACCESS) {
         StructField* rwpsfField = StructFieldOf(rwpnNode);
         if (rwpsfField) return TypeSigned(rwpsfField->rwullVarType);
@@ -1716,23 +1763,31 @@ static void GenNode(CodeBuf* rwpcbCodeBuf, Node* rwpnNode) {
             GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft); TestRax(rwpcbCodeBuf); Setcc(rwpcbCodeBuf, 0x94); MovzxEaxAl(rwpcbCodeBuf);
             break;
 
-        case NODE_ADD: case NODE_SUB: case NODE_MUL:
+        case NODE_ADD: case NODE_MUL:
             GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft); PushRax(rwpcbCodeBuf);
             GenNode(rwpcbCodeBuf, rwpnNode->rwpnRight); PopRcx(rwpcbCodeBuf);
             if (rwpnNode->rwullType == NODE_ADD) AddRaxRcx(rwpcbCodeBuf);
-            else if (rwpnNode->rwullType == NODE_SUB) SubRaxRcx(rwpcbCodeBuf);
             else ImulRaxRcx(rwpcbCodeBuf);
+            break;
+
+        case NODE_SUB:
+            GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft); PushRax(rwpcbCodeBuf);
+            GenNode(rwpcbCodeBuf, rwpnNode->rwpnRight); PopRcx(rwpcbCodeBuf);
+            E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x87); E8(rwpcbCodeBuf, 0xC8);
+            SubRaxRcx(rwpcbCodeBuf);
             break;
 
         case NODE_DIV:
             GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft); PushRax(rwpcbCodeBuf);
             GenNode(rwpcbCodeBuf, rwpnNode->rwpnRight); PopRcx(rwpcbCodeBuf);
+            E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x87); E8(rwpcbCodeBuf, 0xC8);
             IdivRcx(rwpcbCodeBuf);
             break;
 
         case NODE_MOD:
             GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft); PushRax(rwpcbCodeBuf);
             GenNode(rwpcbCodeBuf, rwpnNode->rwpnRight); PopRcx(rwpcbCodeBuf);
+            E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x87); E8(rwpcbCodeBuf, 0xC8);
             IdivRcx(rwpcbCodeBuf);
             E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x89); E8(rwpcbCodeBuf, 0xD0);
             break;
@@ -1759,14 +1814,16 @@ static void GenNode(CodeBuf* rwpcbCodeBuf, Node* rwpnNode) {
             }
             if (rwpfiCurFunc) SymAddLocal(rwpnNode->rwszName, rwpnNode->rwullVarType, rwpnNode->rwullPtrDepth, rwpnNode->rwullArraySize, rwpnNode->rwullStructId, rwpnNode->rwszStructName);
             else SymAddGlobal(rwpnNode->rwszName, rwpnNode->rwullVarType, rwpnNode->rwullPtrDepth, rwpnNode->rwullArraySize, rwpnNode->rwullStructId, rwpnNode->rwszStructName);
-            if (rwpnNode->rwpnLeft) {
+        if (rwpnNode->rwpnLeft) {
+            Symbol* rwpsSymbol = rwpfiCurFunc ? SymFindLocal(rwpnNode->rwszName) : SymFindGlobal(rwpnNode->rwszName);
+            if (rwpsSymbol) {
+                GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
+                PushRax(rwpcbCodeBuf);
                 GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft);
-                Symbol* rwpsSymbol = rwpfiCurFunc ? SymFindLocal(rwpnNode->rwszName) : SymFindGlobal(rwpnNode->rwszName);
-                if (rwpsSymbol) {
-                    GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
-                    E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x89); E8(rwpcbCodeBuf, 0x01);
-                }
+                PopRcx(rwpcbCodeBuf);
+                E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x89); E8(rwpcbCodeBuf, 0x01);
             }
+        }
             break;
         }
 
@@ -1810,7 +1867,7 @@ static void GenNode(CodeBuf* rwpcbCodeBuf, Node* rwpnNode) {
 
         case NODE_DEREF:
             GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft);
-            E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x8B); E8(rwpcbCodeBuf, 0x00);
+            GenLoad(rwpcbCodeBuf, LValueTypeSize(rwpnNode), LValueTypeSigned(rwpnNode));
             break;
 
         case NODE_INDEX:
