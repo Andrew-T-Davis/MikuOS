@@ -1,0 +1,7 @@
+[
+  {
+    "directory": "/data/data/com.termux/files/home/Fish/MikuOS",
+    "file": "bootloader.asm",
+    "command": "nasm -f bin -o bootloader.bin bootloader.asm"
+  }
+]

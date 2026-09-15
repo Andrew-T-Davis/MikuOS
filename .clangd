@@ -1,0 +1,4 @@
+CompileFlags:
+  CompilationDatabase: None
+  Add: [-std=gnu99]
+  Remove: [-x, assembler-with-cpp, '*.asm']

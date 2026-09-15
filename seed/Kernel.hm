@@ -1,0 +1,16 @@
+Func U64 main(){
+    U64 LoopTime=5;
+    Loop5TimeOut0:
+    LoopTime=LoopTime-1;
+    PUSHQ QAX;
+    PUSHQ QDX;
+    MOVW WDX, 0x3F8;
+    MOVB BAL, 48;
+    OUTB WDX, BAL;
+    POPQ QDX;
+    POPQ QAX;
+    If (LoopTime>0) Goto Loop5TimeOut0;
+    U8* VGA=0xA0000;
+    VGA[0]=0xFF;
+    While (1);
+}
