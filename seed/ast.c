@@ -18,6 +18,9 @@ static Node* ParseExpr(void);
 static Node* ParseStmt(void);
 static Node* ParseBlock(void);
 static Node* ParseAggregateDef(U64 rwullNodeType);
+static Node* ParseShift(void);
+static Node* ParseBitAnd(void);
+static Node* ParseBitXor(void);
 
 static Node* ParseFactor(void) {
     if (!rwptCur) return NULL;
@@ -187,6 +190,20 @@ static Node* ParseTerm(void) {
     return rwpnLeft;
 }
 
+static Node* ParseBitXor(void) {
+    Node* rwpnLeft = ParseBitAnd();
+    if (!rwpnLeft) return NULL;
+    while (rwptCur && rwptCur->rwullType == TOK_BITXOR) {
+        rwptCur = rwptCur->rwptNext;
+        Node* rwpnRight = ParseBitAnd();
+        if (!rwpnRight) break;
+        Node* rwpnNode = NodeNew(NODE_BITXOR);
+        rwpnNode->rwpnLeft = rwpnLeft; rwpnNode->rwpnRight = rwpnRight;
+        rwpnLeft = rwpnNode;
+    }
+    return rwpnLeft;
+}
+
 static Node* ParseExpr(void) {
     Node* rwpnLeft = ParseTerm();
     if (!rwpnLeft) return NULL;
@@ -202,8 +219,37 @@ static Node* ParseExpr(void) {
     return rwpnLeft;
 }
 
-static Node* ParseCmp(void) {
+static Node* ParseShift(void) {
     Node* rwpnLeft = ParseExpr();
+    if (!rwpnLeft) return NULL;
+    while (rwptCur && (rwptCur->rwullType == TOK_SHL || rwptCur->rwullType == TOK_SHR)) {
+        U64 rwullT = (rwptCur->rwullType == TOK_SHL) ? NODE_SHL : NODE_SHR;
+        rwptCur = rwptCur->rwptNext;
+        Node* rwpnRight = ParseExpr();
+        if (!rwpnRight) break;
+        Node* rwpnNode = NodeNew(rwullT);
+        rwpnNode->rwpnLeft = rwpnLeft; rwpnNode->rwpnRight = rwpnRight;
+        rwpnLeft = rwpnNode;
+    }
+    return rwpnLeft;
+}
+
+static Node* ParseBitAnd(void) {
+    Node* rwpnLeft = ParseShift();
+    if (!rwpnLeft) return NULL;
+    while (rwptCur && rwptCur->rwullType == TOK_AMP) {
+        rwptCur = rwptCur->rwptNext;
+        Node* rwpnRight = ParseShift();
+        if (!rwpnRight) break;
+        Node* rwpnNode = NodeNew(NODE_BITAND);
+        rwpnNode->rwpnLeft = rwpnLeft; rwpnNode->rwpnRight = rwpnRight;
+        rwpnLeft = rwpnNode;
+    }
+    return rwpnLeft;
+}
+
+static Node* ParseCmp(void) {
+    Node* rwpnLeft = ParseShift();
     if (!rwpnLeft) return NULL;
     while (rwptCur && (rwptCur->rwullType == TOK_EQ || rwptCur->rwullType == TOK_NEQ ||
                        rwptCur->rwullType == TOK_LT || rwptCur->rwullType == TOK_GT ||
@@ -468,6 +514,13 @@ static Node* ParseReturn(void) {
 
 static Node* ParseFunc(void) {
     rwptCur = rwptCur->rwptNext;
+
+    U64 rwullIsNaked = 0;
+    if (rwptCur && rwptCur->rwullType == TOK_KW_NAKED) {
+        rwullIsNaked = 1;
+        rwptCur = rwptCur->rwptNext;
+    }
+
     U64 rwullRetType = 0;
     U64 rwullRetStruct = 0;
     char* rwszRetStructName = NULL;
@@ -492,6 +545,7 @@ static Node* ParseFunc(void) {
     rwpnNode->rwullPtrDepth = rwullPtr;
     rwpnNode->rwullStructId = rwullRetStruct;
     rwpnNode->rwszStructName = rwszRetStructName;
+    rwpnNode->rwullIsNaked = rwullIsNaked;
 
     if (rwptCur && rwptCur->rwullType == TOK_LPAREN) {
         rwptCur = rwptCur->rwptNext;
@@ -831,6 +885,10 @@ void AstPrint(Node* rwpnRoot, int rwullDepth) {
         case NODE_ADDR: printf("ADDR\n"); break;
         case NODE_DEREF: printf("DEREF\n"); break;
         case NODE_BREAK: printf("BREAK\n"); break;
+        case NODE_SHL: printf("SHL\n"); break;
+        case NODE_SHR: printf("SHR\n"); break;
+        case NODE_BITAND: printf("BITAND\n"); break;
+        case NODE_BITXOR: printf("BITXOR\n"); break;
         case NODE_CONTINUE: printf("CONTINUE\n"); break;
         case NODE_GOTO: printf("GOTO(%s)\n", rwpnRoot->rwszName); break;
         case NODE_LABEL: printf("LABEL(%s)\n", rwpnRoot->rwszName); break;
@@ -871,8 +929,7 @@ void AstPrint(Node* rwpnRoot, int rwullDepth) {
         return;
     }
     if (rwpnRoot->rwullType == NODE_STRUCT_DEF || rwpnRoot->rwullType == NODE_UNION_DEF) {
-        Node* rwpnF = rwpnRoot->rwpnArgs;
-        while (rwpnF) { AstPrint(rwpnF, rwullDepth + 1); rwpnF = rwpnF->rwpnNext; }
+        AstPrint(rwpnRoot->rwpnArgs, rwullDepth + 1);
         AstPrint(rwpnRoot->rwpnNext, rwullDepth);
         return;
     }

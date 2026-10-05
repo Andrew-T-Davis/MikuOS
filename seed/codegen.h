@@ -67,7 +67,6 @@ typedef struct StructInfo StructInfo;
 struct StructInfo {
     char* rwszName;
     U64 rwullSize;
-    U64 rwullAlign;
     U64 rwullIsUnion;
     StructField* rwpsfFields;
     StructInfo* rwpsiNext;

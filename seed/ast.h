@@ -9,6 +9,7 @@ typedef enum NodeType {
     NODE_BLOCK, NODE_IF, NODE_WHILE,
     NODE_EQ, NODE_NEQ, NODE_LT, NODE_GT, NODE_LE, NODE_GE,
     NODE_AND, NODE_OR, NODE_NOT,
+    NODE_SHL, NODE_SHR, NODE_BITAND, NODE_BITXOR,
     NODE_FUNC, NODE_CALL, NODE_RETURN,
     NODE_ARRAY, NODE_INDEX, NODE_ADDR, NODE_DEREF,
     NODE_BREAK, NODE_CONTINUE, NODE_GOTO, NODE_LABEL,
@@ -28,6 +29,7 @@ struct Node {
     U64 rwullAsmReg;
     U64 rwullAsmScale;
     U64 rwullStructId;
+    U64 rwullIsNaked;
     char* rwszName;
     char* rwszStructName;
     Node* rwpnLeft;

@@ -17,7 +17,7 @@ static Keyword g_rwaKeywords[] = {
     {"U64", TOK_KW_U64}, {"S64", TOK_KW_S64},
     {"U0", TOK_KW_U0},
     {"If", TOK_KW_IF}, {"Else", TOK_KW_ELSE}, {"While", TOK_KW_WHILE},
-    {"Func", TOK_KW_FUNC}, {"Return", TOK_KW_RETURN},
+    {"Func", TOK_KW_FUNC}, {"Naked", TOK_KW_NAKED}, {"Return", TOK_KW_RETURN},
     {"Break", TOK_KW_BREAK}, {"Continue", TOK_KW_CONTINUE}, {"Goto", TOK_KW_GOTO},
     {"Struct", TOK_KW_STRUCT}, {"SizeOf", TOK_KW_SIZEOF}, {"Union", TOK_KW_UNION},
 };
@@ -169,16 +169,19 @@ TokenRoot* CodeToToken(char* rwszCode) {
         else if (rwszCur[0] == '&' && rwszCur[1] == '&') { rwptNode->rwullType = TOK_AND; rwszCur += 2; }
         else if (rwszCur[0] == '|' && rwszCur[1] == '|') { rwptNode->rwullType = TOK_OR; rwszCur += 2; }
         else if (rwszCur[0] == '-' && rwszCur[1] == '>') { rwptNode->rwullType = TOK_ARROW; rwszCur += 2; }
+        else if (rwszCur[0] == '<' && rwszCur[1] == '<') { rwptNode->rwullType = TOK_SHL; rwszCur += 2; }
+        else if (rwszCur[0] == '>' && rwszCur[1] == '>') { rwptNode->rwullType = TOK_SHR; rwszCur += 2; }
         else if (*rwszCur == '<') { rwptNode->rwullType = TOK_LT; rwszCur++; }
         else if (*rwszCur == '>') { rwptNode->rwullType = TOK_GT; rwszCur++; }
         else if (*rwszCur == '!') { rwptNode->rwullType = TOK_NOT; rwszCur++; }
         else if (*rwszCur == '&') { rwptNode->rwullType = TOK_AMP; rwszCur++; }
         else if (*rwszCur == '+') { rwptNode->rwullType = TOK_PLUS; rwszCur++; }
         else if (*rwszCur == '-') { rwptNode->rwullType = TOK_MINUS; rwszCur++; }
+        else if (rwszCur[0] == '*' && rwszCur[1] == '*') { rwptNode->rwullType = TOK_POW; rwszCur += 2; }
         else if (*rwszCur == '*') { rwptNode->rwullType = TOK_STAR; rwszCur++; }
         else if (*rwszCur == '/') { rwptNode->rwullType = TOK_DIV; rwszCur++; }
         else if (*rwszCur == '%') { rwptNode->rwullType = TOK_MOD; rwszCur++; }
-        else if (*rwszCur == '^') { rwptNode->rwullType = TOK_POW; rwszCur++; }
+        else if (*rwszCur == '^') { rwptNode->rwullType = TOK_BITXOR; rwszCur++; }
         else if (*rwszCur == '(') { rwptNode->rwullType = TOK_LPAREN; rwszCur++; }
         else if (*rwszCur == ')') { rwptNode->rwullType = TOK_RPAREN; rwszCur++; }
         else if (*rwszCur == '{') { rwptNode->rwullType = TOK_LBRACE; rwszCur++; }

@@ -373,7 +373,7 @@ GlobalGDTEnd:
 
 GlobalGDTDescriptor:
     dw GlobalGDTEnd - GlobalGDTStart - 1
-    dd GlobalGDTStart
+    dq GlobalGDTStart
 
 SEL_NULL    equ 0x00
 SEL_PM_CODE equ 0x08
