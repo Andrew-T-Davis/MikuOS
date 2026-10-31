@@ -1915,23 +1915,23 @@ static void GenNode(CodeBuf* rwpcbCodeBuf, Node* rwpnNode) {
             break;
         }
 
-    case NODE_VAR: {
-        Symbol* rwpsSymbol = SymFindLocal(rwpnNode->rwszName);
-        if (!rwpsSymbol) rwpsSymbol = SymFindGlobal(rwpnNode->rwszName);
-        if (!rwpsSymbol) { MovRaxImm(rwpcbCodeBuf, 0); break; }
+        case NODE_VAR: {
+            Symbol* rwpsSymbol = SymFindLocal(rwpnNode->rwszName);
+            if (!rwpsSymbol) rwpsSymbol = SymFindGlobal(rwpnNode->rwszName);
+            if (!rwpsSymbol) { MovRaxImm(rwpcbCodeBuf, 0); break; }
 
-        if (rwpsSymbol->rwullPtrDepth > 0) {
-            GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
-            GenLoad(rwpcbCodeBuf, 8, 0);
-        } else if (rwpsSymbol->rwullArraySize || rwpsSymbol->rwullStructId) {
-            GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
-        } else {
-            GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
-            U64 rwullSz = SymbolElemSize(rwpsSymbol);
-            GenLoad(rwpcbCodeBuf, rwullSz, TypeSigned(rwpsSymbol->rwullVarType));
+            if (rwpsSymbol->rwullPtrDepth > 0) {
+                GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
+                GenLoad(rwpcbCodeBuf, 8, 0);
+            } else if (rwpsSymbol->rwullArraySize || rwpsSymbol->rwullStructId) {
+                GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
+            } else {
+                GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
+                U64 rwullSz = SymbolElemSize(rwpsSymbol);
+                GenLoad(rwpcbCodeBuf, rwullSz, TypeSigned(rwpsSymbol->rwullVarType));
+            }
+            break;
         }
-        break;
-    }
 
         case NODE_ASSIGN: {
             if (NodeIsStructByValue(rwpnNode->rwpnLeft) && rwpnNode->rwpnRight) {
@@ -2363,6 +2363,11 @@ static void GenNode(CodeBuf* rwpcbCodeBuf, Node* rwpnNode) {
             GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft); PushRax(rwpcbCodeBuf);
             GenNode(rwpcbCodeBuf, rwpnNode->rwpnRight); PopRcx(rwpcbCodeBuf);
             E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x31); E8(rwpcbCodeBuf, 0xC8);
+            break;
+        case NODE_BITAND:
+            GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft); PushRax(rwpcbCodeBuf);
+            GenNode(rwpcbCodeBuf, rwpnNode->rwpnRight); PopRcx(rwpcbCodeBuf);
+            E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x21); E8(rwpcbCodeBuf, 0xC8);
             break;
 
         default: break;

@@ -238,6 +238,8 @@ _start2:
     out dx, al
     pop dx
 
+    call DetectMemoryE820
+
     cli
     cld
     o32 lgdt [GlobalGDTDescriptor]
@@ -347,6 +349,57 @@ A20_KBC:
     pop ax
     ret
 
+DetectMemoryE820:
+    pusha
+    push es
+    push ds
+
+    xor ax, ax
+    mov es, ax
+    mov ds, ax
+    mov di, E820MapBuffer
+    xor ebx, ebx
+    mov dword [E820MapCount], 1
+
+.Loop:
+    mov eax, 0xE820
+    mov edx, 0x534D4150
+    mov ecx, 24
+    mov dword [es:di + 20], 1
+
+    int 0x15
+    jc .Done
+
+    cmp eax, 0x534D4150
+    jne .Done
+
+    jcxz .Next
+
+    cmp ecx, 20
+    jb .Next
+
+    cmp ecx, 24
+    jl .KeepEntry
+    test byte [es:di + 20], 1
+    jz .Next
+
+.KeepEntry:
+    inc dword [E820MapCount]
+    add di, 24
+    cmp dword [E820MapCount], 64
+    jge .Done
+
+.Next:
+    test ebx, ebx
+    jnz .Loop
+
+.Done:
+    pop ds
+    pop es
+    popa
+    ret
+
+
 align 4
 ReadLBAInStartFuncDAPStart2:
     db 0x10
@@ -361,6 +414,9 @@ KernelSize: dd 0
 KernelSectors: dw 0
 BootDiskNumberInStart2: db 0x00
 KernelNameLen: dd 0x0
+
+E820MapCount  equ 0x1000 
+E820MapBuffer equ 0x1008
 
 align 8
 GlobalGDTStart:
@@ -510,6 +566,9 @@ LModeEntry:
     mov al, 'M'
     out dx, al
     pop rdx
+
+    mov rsi, E820MapBuffer
+    mov rdi, E820MapCount
 
     mov eax, [KernelNameLen]
     add rax, 0x8400

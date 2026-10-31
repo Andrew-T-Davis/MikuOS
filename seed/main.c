@@ -3,6 +3,8 @@
 #include "codegen.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <inttypes.h>
 
 static char* FileReadAll(const char* rwroszPath, U64* rwpullSize) {
     FILE* rwpfFile = fopen(rwroszPath, "rb");
@@ -19,6 +21,55 @@ static char* FileReadAll(const char* rwroszPath, U64* rwpullSize) {
     return rwszBuf;
 }
 
+static char* EatOneInclude(const char* roszSrc, U64* rwpullOutSize) {
+    if (strncmp(roszSrc, "@Include \"", 10) != 0) return NULL;
+
+    const char* roszName    = roszSrc + 10;
+    const char* roszNameEnd = roszName;
+    while (*roszNameEnd && *roszNameEnd != '"' && *roszNameEnd != '\n')
+        roszNameEnd++;
+
+    if (*roszNameEnd != '"') {
+        fprintf(stderr, "Include: missing closing '\"'\n");
+        return NULL;
+    }
+
+    U64 rwullNameLen = (U64)(roszNameEnd - roszName);
+    char rwszNameBuf[0x1000];
+    if (rwullNameLen >= sizeof(rwszNameBuf)) {
+        fprintf(stderr, "Include: filename too long\n");
+        return NULL;
+    }
+    memcpy(rwszNameBuf, roszName, rwullNameLen);
+    rwszNameBuf[rwullNameLen] = '\0';
+
+    U64 rwullIncSize = 0;
+    char* rwszInc = FileReadAll(rwszNameBuf, &rwullIncSize);
+    if (!rwszInc) {
+        fprintf(stderr, "Include: cannot read %s\n", rwszNameBuf);
+        return NULL;
+    }
+
+    const char* roszRest = roszNameEnd + 1;
+    if (*roszRest == '\r') roszRest++;
+    if (*roszRest == '\n') roszRest++;
+
+    U64 rwullRestLen = strlen(roszRest);
+
+    char* rwszNew = malloc(rwullIncSize + rwullRestLen + 1);
+    if (!rwszNew) {
+        free(rwszInc);
+        return NULL;
+    }
+
+    memcpy(rwszNew + rwullRestLen, rwszInc, rwullIncSize);
+    memcpy(rwszNew, roszRest, rwullRestLen);
+
+    *rwpullOutSize = rwullIncSize + rwullRestLen;
+    free(rwszInc);
+    return rwszNew;
+}
+
 int main(int rwsiArgc, char** rwpszArgv) {
     if (rwsiArgc != 3) {
         fprintf(stderr, "usage: %s <input.hm> <output.bin>\n", rwpszArgv[0]);
@@ -31,6 +82,20 @@ int main(int rwsiArgc, char** rwpszArgv) {
         fprintf(stderr, "failed to read %s\n", rwpszArgv[1]);
         return 1;
     }
+
+    U64 rwullIncludeCount = 0;
+    while (1) {
+        U64 rwullNewSize = 0;
+        char* rwszNew = EatOneInclude(rwszCode, &rwullNewSize);
+        if (!rwszNew) break;
+
+        free(rwszCode);
+        rwszCode     = rwszNew;
+        rwullSrcSize = rwullNewSize;
+        rwullIncludeCount++;
+    }
+
+    printf("Include %" PRIu64 " files\n", rwullIncludeCount);
 
     TokenRoot* rwptrRoot = CodeToToken(rwszCode);
     if (!rwptrRoot) {

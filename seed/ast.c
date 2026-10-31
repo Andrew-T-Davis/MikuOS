@@ -21,6 +21,7 @@ static Node* ParseAggregateDef(U64 rwullNodeType);
 static Node* ParseShift(void);
 static Node* ParseBitAnd(void);
 static Node* ParseBitXor(void);
+static Node* ParseOr(void);
 
 static Node* ParseFactor(void) {
     if (!rwptCur) return NULL;
@@ -77,7 +78,7 @@ static Node* ParseFactor(void) {
             rwpnNode->rwszName = rwszName;
             Node* rwpnTail = NULL;
             while (rwptCur && rwptCur->rwullType != TOK_RPAREN) {
-                Node* rwpnArg = ParseExpr();
+                Node* rwpnArg = ParseOr();
                 if (!rwpnArg) break;
                 if (!rwpnTail) rwpnNode->rwpnArgs = rwpnArg;
                 else rwpnTail->rwpnNext = rwpnArg;
@@ -93,7 +94,7 @@ static Node* ParseFactor(void) {
 
         while (rwptCur && rwptCur->rwullType == TOK_LBRACKET) {
             rwptCur = rwptCur->rwptNext;
-            Node* rwpnIdx = ParseExpr();
+            Node* rwpnIdx = ParseOr();
             if (rwptCur && rwptCur->rwullType == TOK_RBRACKET) rwptCur = rwptCur->rwptNext;
             Node* rwpnIn = NodeNew(NODE_INDEX);
             rwpnIn->rwpnLeft = rwpnNode;
@@ -113,7 +114,7 @@ static Node* ParseFactor(void) {
             rwpnNode = rwpnAcc;
             while (rwptCur && rwptCur->rwullType == TOK_LBRACKET) {
                 rwptCur = rwptCur->rwptNext;
-                Node* rwpnIdx = ParseExpr();
+                Node* rwpnIdx = ParseOr();
                 if (rwptCur && rwptCur->rwullType == TOK_RBRACKET) rwptCur = rwptCur->rwptNext;
                 Node* rwpnIn = NodeNew(NODE_INDEX);
                 rwpnIn->rwpnLeft = rwpnNode;
@@ -126,7 +127,7 @@ static Node* ParseFactor(void) {
 
     if (rwptCur->rwullType == TOK_LPAREN) {
         rwptCur = rwptCur->rwptNext;
-        Node* rwpnNode = ParseExpr();
+        Node* rwpnNode = ParseOr();
         if (rwptCur && rwptCur->rwullType == TOK_RPAREN) rwptCur = rwptCur->rwptNext;
         return rwpnNode;
     }
@@ -234,20 +235,6 @@ static Node* ParseShift(void) {
     return rwpnLeft;
 }
 
-static Node* ParseBitAnd(void) {
-    Node* rwpnLeft = ParseShift();
-    if (!rwpnLeft) return NULL;
-    while (rwptCur && rwptCur->rwullType == TOK_AMP) {
-        rwptCur = rwptCur->rwptNext;
-        Node* rwpnRight = ParseShift();
-        if (!rwpnRight) break;
-        Node* rwpnNode = NodeNew(NODE_BITAND);
-        rwpnNode->rwpnLeft = rwpnLeft; rwpnNode->rwpnRight = rwpnRight;
-        rwpnLeft = rwpnNode;
-    }
-    return rwpnLeft;
-}
-
 static Node* ParseCmp(void) {
     Node* rwpnLeft = ParseShift();
     if (!rwpnLeft) return NULL;
@@ -264,7 +251,7 @@ static Node* ParseCmp(void) {
             default: rwullT = NODE_GE; break;
         }
         rwptCur = rwptCur->rwptNext;
-        Node* rwpnRight = ParseExpr();
+        Node* rwpnRight = ParseShift();
         if (!rwpnRight) break;
         Node* rwpnNode = NodeNew(rwullT);
         rwpnNode->rwpnLeft = rwpnLeft; rwpnNode->rwpnRight = rwpnRight;
@@ -273,8 +260,22 @@ static Node* ParseCmp(void) {
     return rwpnLeft;
 }
 
-static Node* ParseAnd(void) {
+static Node* ParseBitAnd(void) {
     Node* rwpnLeft = ParseCmp();
+    if (!rwpnLeft) return NULL;
+    while (rwptCur && rwptCur->rwullType == TOK_AMP) {
+        rwptCur = rwptCur->rwptNext;
+        Node* rwpnRight = ParseCmp();
+        if (!rwpnRight) break;
+        Node* rwpnNode = NodeNew(NODE_BITAND);
+        rwpnNode->rwpnLeft = rwpnLeft; rwpnNode->rwpnRight = rwpnRight;
+        rwpnLeft = rwpnNode;
+    }
+    return rwpnLeft;
+}
+
+static Node* ParseAnd(void) {
+    Node* rwpnLeft = ParseBitXor();
     if (!rwpnLeft) return NULL;
     while (rwptCur && rwptCur->rwullType == TOK_AND) {
         rwptCur = rwptCur->rwptNext;
@@ -457,7 +458,7 @@ static Node* ParseAssign(void) {
 
         while (rwptCur && rwptCur->rwullType == TOK_LBRACKET) {
             rwptCur = rwptCur->rwptNext;
-            Node* rwpnIdx = ParseExpr();
+            Node* rwpnIdx = ParseOr();
             if (rwptCur && rwptCur->rwullType == TOK_RBRACKET) rwptCur = rwptCur->rwptNext;
             Node* rwpnIn = NodeNew(NODE_INDEX);
             rwpnIn->rwpnLeft = rwpnTarget;
@@ -477,7 +478,7 @@ static Node* ParseAssign(void) {
             rwpnTarget = rwpnAcc;
             while (rwptCur && rwptCur->rwullType == TOK_LBRACKET) {
                 rwptCur = rwptCur->rwptNext;
-                Node* rwpnIdx = ParseExpr();
+                Node* rwpnIdx = ParseOr();
                 if (rwptCur && rwptCur->rwullType == TOK_RBRACKET) rwptCur = rwptCur->rwptNext;
                 Node* rwpnIn = NodeNew(NODE_INDEX);
                 rwpnIn->rwpnLeft = rwpnTarget;
@@ -651,7 +652,11 @@ static Node* ParseAsmOperand(void) {
             rwpnMem->rwullAsmReg = rwptCur->rwullAsmReg;
             rwptCur = rwptCur->rwptNext;
         } else if (rwptCur && rwptCur->rwullType == TOK_IDENT) {
-            rwpnMem->rwszName = strdup(rwptCur->rwszName);
+            rwszName: rwpnMem->rwszName = strdup(rwptCur->rwszName);
+            rwptCur = rwptCur->rwptNext;
+        } else if (rwptCur && rwptCur->rwullType == TOK_NUM) {
+            rwpnMem->rwpnThird = NodeNew(NODE_ASM_IMM);
+            rwpnMem->rwpnThird->rwullValue = rwptCur->rwullValue;
             rwptCur = rwptCur->rwptNext;
         }
 
@@ -708,6 +713,7 @@ static Node* ParseAsmOperand(void) {
 
     return NULL;
 }
+
 
 static Node* ParseAsm(void) {
     Node* rwpnNode = NodeNew(NODE_ASM);
@@ -895,7 +901,19 @@ void AstPrint(Node* rwpnRoot, int rwullDepth) {
         case NODE_ASM: printf("ASM(%s)\n", AsmOpName(rwpnRoot->rwullAsmOp)); break;
         case NODE_ASM_REG: printf("ASM_REG(%s)\n", AsmRegName(rwpnRoot->rwullAsmReg)); break;
         case NODE_ASM_IMM: printf("ASM_IMM(%llu)\n", (unsigned long long)rwpnRoot->rwullValue); break;
-        case NODE_ASM_MEM: printf("ASM_MEM\n"); break;
+        case NODE_ASM_MEM: {
+            printf("ASM_MEM(");
+            if (rwpnRoot->rwszName) printf("sym=%s ", rwpnRoot->rwszName);
+            if (rwpnRoot->rwullAsmReg != ASM_REG_NONE) printf("base=%s ", AsmRegName(rwpnRoot->rwullAsmReg));
+            if (rwpnRoot->rwpnLeft) {
+                if (rwpnRoot->rwpnLeft->rwszName) printf("idx_sym=%s ", rwpnRoot->rwpnLeft->rwszName);
+                if (rwpnRoot->rwpnLeft->rwullAsmReg != ASM_REG_NONE) printf("idx=%s ", AsmRegName(rwpnRoot->rwpnLeft->rwullAsmReg));
+                if (rwpnRoot->rwullAsmScale) printf("scale=%llu ", (unsigned long long)rwpnRoot->rwullAsmScale);
+            }
+            if (rwpnRoot->rwpnThird) printf("disp=%lld", (long long)rwpnRoot->rwpnThird->rwullValue);
+            printf(")\n");
+            break;
+        }
         case NODE_ASM_LABEL: printf("ASM_LABEL(%s)\n", rwpnRoot->rwszName); break;
         case NODE_STRUCT_DEF: printf("STRUCT_DEF(%s)\n", rwpnRoot->rwszName); break;
         case NODE_UNION_DEF: printf("UNION_DEF(%s)\n", rwpnRoot->rwszName); break;

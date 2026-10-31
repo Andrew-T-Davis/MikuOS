@@ -47,67 +47,93 @@ static void TokenAppend(TokenRoot* rwptrRoot, Token* rwptNode) {
     }
 }
 
-static void SkipSpace(char** rwppszCode) {
-    while (**rwppszCode == ' ' || **rwppszCode == '\t' ||
-           **rwppszCode == '\n' || **rwppszCode == '\r') {
-        (*rwppszCode)++;
+static void SkipSpace(char** rwpszCode) {
+    while (**rwpszCode == ' ' || **rwpszCode == '\t' ||
+           **rwpszCode == '\n' || **rwpszCode == '\r') {
+        (*rwpszCode)++;
     }
 }
 
-static void SkipLineComment(char** rwppszCode) {
-    while (**rwppszCode && **rwppszCode != '\n') (*rwppszCode)++;
+static void SkipLineComment(char** rwpszCode) {
+    while (**rwpszCode && **rwpszCode != '\n') (*rwpszCode)++;
 }
 
-static void SkipBlockComment(char** rwppszCode) {
-    (*rwppszCode) += 2;
-    while (**rwppszCode && !(**rwppszCode == '*' && *(*rwppszCode + 1) == '/'))
-        (*rwppszCode)++;
-    if (**rwppszCode) (*rwppszCode) += 2;
+static void SkipBlockComment(char** rwpszCode) {
+    (*rwpszCode) += 2;
+    while (**rwpszCode && !(**rwpszCode == '*' && *(*rwpszCode + 1) == '/'))
+        (*rwpszCode)++;
+    if (**rwpszCode) (*rwpszCode) += 2;
 }
 
-static U64 LexNumber(char** rwppszCode) {
+static U64 LexNumber(char** rwpszCode) {
     U64 rwullValue = 0;
-    if (**rwppszCode == '0' && (*(*rwppszCode + 1) == 'x' || *(*rwppszCode + 1) == 'X')) {
-        (*rwppszCode) += 2;
-        while (isxdigit((unsigned char)**rwppszCode)) {
-            char rwszC = **rwppszCode;
-            U64 rwullD = (rwszC >= '0' && rwszC <= '9') ? rwszC - '0' :
-                         (rwszC >= 'a' && rwszC <= 'f') ? rwszC - 'a' + 10 : rwszC - 'A' + 10;
+    
+    if (**rwpszCode == '0' && (*(*rwpszCode + 1) == 'x' || *(*rwpszCode + 1) == 'X')) {
+        (*rwpszCode) += 2;
+        while (isxdigit((unsigned char)**rwpszCode)) {
+            char rwcC = **rwpszCode;
+            U64 rwullD = (rwcC >= '0' && rwcC <= '9') ? rwcC - '0' :
+                         (rwcC >= 'a' && rwcC <= 'f') ? rwcC - 'a' + 10 : rwcC - 'A' + 10;
             rwullValue = rwullValue * 16 + rwullD;
-            (*rwppszCode)++;
+            (*rwpszCode)++;
         }
         return rwullValue;
     }
-    while (**rwppszCode >= '0' && **rwppszCode <= '9') {
-        rwullValue = rwullValue * 10 + (**rwppszCode - '0');
-        (*rwppszCode)++;
+
+    if (**rwpszCode == '0' && (*(*rwpszCode + 1) == 'b' || *(*rwpszCode + 1) == 'B')) {
+        (*rwpszCode) += 2;
+        while (**rwpszCode == '0' || **rwpszCode == '1') {
+            rwullValue = (rwullValue << 1) | (**rwpszCode - '0');
+            (*rwpszCode)++;
+        }
+        return rwullValue;
+    }
+
+    if (**rwpszCode == '0' && (*(*rwpszCode + 1) == 't' || *(*rwpszCode + 1) == 'T')) {
+        (*rwpszCode) += 2;
+        while (**rwpszCode == '0' || **rwpszCode == '1' || **rwpszCode == 't' || **rwpszCode == 'T') {
+            char rwcC = **rwpszCode;
+            S64 rwsllDigit = 0;
+            if (rwcC == '1') rwsllDigit = 1;
+            else if (rwcC == 't' || rwcC == 'T') rwsllDigit = -1;
+            
+            rwullValue = rwullValue * 3 + rwsllDigit;
+            (*rwpszCode)++;
+        }
+        return rwullValue;
+    }
+
+    while (**rwpszCode >= '0' && **rwpszCode <= '9') {
+        rwullValue = rwullValue * 10 + (**rwpszCode - '0');
+        (*rwpszCode)++;
     }
     return rwullValue;
 }
 
-static char* LexIdent(char** rwppszCode) {
-    char* rwszStart = *rwppszCode;
-    while (isalnum((unsigned char)**rwppszCode) || **rwppszCode == '_')
-        (*rwppszCode)++;
-    U64 rwullLen = (U64)(*rwppszCode - rwszStart);
+
+static char* LexIdent(char** rwpszCode) {
+    char* rwszStart = *rwpszCode;
+    while (isalnum((unsigned char)**rwpszCode) || **rwpszCode == '_')
+        (*rwpszCode)++;
+    U64 rwullLen = (U64)(*rwpszCode - rwszStart);
     char* rwszName = malloc(rwullLen + 1);
     memcpy(rwszName, rwszStart, rwullLen);
     rwszName[rwullLen] = '\0';
     return rwszName;
 }
 
-static char* LexString(char** rwppszCode) {
-    (*rwppszCode)++;
-    char* rwszStart = *rwppszCode;
-    while (**rwppszCode && **rwppszCode != '"') {
-        if (**rwppszCode == '\\' && *(*rwppszCode + 1)) (*rwppszCode)++;
-        (*rwppszCode)++;
+static char* LexString(char** rwpszCode) {
+    (*rwpszCode)++;
+    char* rwszStart = *rwpszCode;
+    while (**rwpszCode && **rwpszCode != '"') {
+        if (**rwpszCode == '\\' && *(*rwpszCode + 1)) (*rwpszCode)++;
+        (*rwpszCode)++;
     }
-    U64 rwullLen = (U64)(*rwppszCode - rwszStart);
+    U64 rwullLen = (U64)(*rwpszCode - rwszStart);
     char* rwszStr = malloc(rwullLen + 1);
     memcpy(rwszStr, rwszStart, rwullLen);
     rwszStr[rwullLen] = '\0';
-    if (**rwppszCode == '"') (*rwppszCode)++;
+    if (**rwpszCode == '"') (*rwpszCode)++;
     return rwszStr;
 }
 
@@ -118,25 +144,25 @@ TokenRoot* CodeToToken(char* rwszCode) {
     rwptrRoot->rwptHead = NULL;
     rwptrRoot->rwptTail = NULL;
 
-    char* rwszCur = rwszCode;
+    char* rwpcCur = rwszCode;
 
-    while (*rwszCur) {
-        SkipSpace(&rwszCur);
-        if (!*rwszCur) break;
+    while (*rwpcCur) {
+        SkipSpace(&rwpcCur);
+        if (!*rwpcCur) break;
 
-        if (rwszCur[0] == '/' && rwszCur[1] == '/') { SkipLineComment(&rwszCur); continue; }
-        if (rwszCur[0] == '/' && rwszCur[1] == '*') { SkipBlockComment(&rwszCur); continue; }
+        if (rwpcCur[0] == '/' && rwpcCur[1] == '/') { SkipLineComment(&rwpcCur); continue; }
+        if (rwpcCur[0] == '/' && rwpcCur[1] == '*') { SkipBlockComment(&rwpcCur); continue; }
 
         Token* rwptNode = TokenNew();
 
-        if (*rwszCur >= '0' && *rwszCur <= '9') {
+        if (*rwpcCur >= '0' && *rwpcCur <= '9') {
             rwptNode->rwullType = TOK_NUM;
-            rwptNode->rwullValue = LexNumber(&rwszCur);
-        } else if (*rwszCur == '"') {
+            rwptNode->rwullValue = LexNumber(&rwpcCur);
+        } else if (*rwpcCur == '"') {
             rwptNode->rwullType = TOK_STR;
-            rwptNode->rwszName = LexString(&rwszCur);
-        } else if (isalpha((unsigned char)*rwszCur) || *rwszCur == '_') {
-            rwptNode->rwszName = LexIdent(&rwszCur);
+            rwptNode->rwszName = LexString(&rwpcCur);
+        } else if (isalpha((unsigned char)*rwpcCur) || *rwpcCur == '_') {
+            rwptNode->rwszName = LexIdent(&rwpcCur);
             U64 rwullKw = KeywordLookup(rwptNode->rwszName);
             if (rwullKw) {
                 rwptNode->rwullType = rwullKw;
@@ -162,38 +188,38 @@ TokenRoot* CodeToToken(char* rwszCode) {
                 }
             }
         }
-        else if (rwszCur[0] == '=' && rwszCur[1] == '=') { rwptNode->rwullType = TOK_EQ; rwszCur += 2; }
-        else if (rwszCur[0] == '!' && rwszCur[1] == '=') { rwptNode->rwullType = TOK_NEQ; rwszCur += 2; }
-        else if (rwszCur[0] == '<' && rwszCur[1] == '=') { rwptNode->rwullType = TOK_LE; rwszCur += 2; }
-        else if (rwszCur[0] == '>' && rwszCur[1] == '=') { rwptNode->rwullType = TOK_GE; rwszCur += 2; }
-        else if (rwszCur[0] == '&' && rwszCur[1] == '&') { rwptNode->rwullType = TOK_AND; rwszCur += 2; }
-        else if (rwszCur[0] == '|' && rwszCur[1] == '|') { rwptNode->rwullType = TOK_OR; rwszCur += 2; }
-        else if (rwszCur[0] == '-' && rwszCur[1] == '>') { rwptNode->rwullType = TOK_ARROW; rwszCur += 2; }
-        else if (rwszCur[0] == '<' && rwszCur[1] == '<') { rwptNode->rwullType = TOK_SHL; rwszCur += 2; }
-        else if (rwszCur[0] == '>' && rwszCur[1] == '>') { rwptNode->rwullType = TOK_SHR; rwszCur += 2; }
-        else if (*rwszCur == '<') { rwptNode->rwullType = TOK_LT; rwszCur++; }
-        else if (*rwszCur == '>') { rwptNode->rwullType = TOK_GT; rwszCur++; }
-        else if (*rwszCur == '!') { rwptNode->rwullType = TOK_NOT; rwszCur++; }
-        else if (*rwszCur == '&') { rwptNode->rwullType = TOK_AMP; rwszCur++; }
-        else if (*rwszCur == '+') { rwptNode->rwullType = TOK_PLUS; rwszCur++; }
-        else if (*rwszCur == '-') { rwptNode->rwullType = TOK_MINUS; rwszCur++; }
-        else if (rwszCur[0] == '*' && rwszCur[1] == '*') { rwptNode->rwullType = TOK_POW; rwszCur += 2; }
-        else if (*rwszCur == '*') { rwptNode->rwullType = TOK_STAR; rwszCur++; }
-        else if (*rwszCur == '/') { rwptNode->rwullType = TOK_DIV; rwszCur++; }
-        else if (*rwszCur == '%') { rwptNode->rwullType = TOK_MOD; rwszCur++; }
-        else if (*rwszCur == '^') { rwptNode->rwullType = TOK_BITXOR; rwszCur++; }
-        else if (*rwszCur == '(') { rwptNode->rwullType = TOK_LPAREN; rwszCur++; }
-        else if (*rwszCur == ')') { rwptNode->rwullType = TOK_RPAREN; rwszCur++; }
-        else if (*rwszCur == '{') { rwptNode->rwullType = TOK_LBRACE; rwszCur++; }
-        else if (*rwszCur == '}') { rwptNode->rwullType = TOK_RBRACE; rwszCur++; }
-        else if (*rwszCur == '[') { rwptNode->rwullType = TOK_LBRACKET; rwszCur++; }
-        else if (*rwszCur == ']') { rwptNode->rwullType = TOK_RBRACKET; rwszCur++; }
-        else if (*rwszCur == ',') { rwptNode->rwullType = TOK_COMMA; rwszCur++; }
-        else if (*rwszCur == ';') { rwptNode->rwullType = TOK_SEMI; rwszCur++; }
-        else if (*rwszCur == ':') { rwptNode->rwullType = TOK_COLON; rwszCur++; }
-        else if (*rwszCur == '.') { rwptNode->rwullType = TOK_DOT; rwszCur++; }
-        else if (*rwszCur == '=') { rwptNode->rwullType = TOK_ASSIGN; rwszCur++; }
-        else { free(rwptNode); rwszCur++; continue; }
+        else if (rwpcCur[0] == '=' && rwpcCur[1] == '=') { rwptNode->rwullType = TOK_EQ; rwpcCur += 2; }
+        else if (rwpcCur[0] == '!' && rwpcCur[1] == '=') { rwptNode->rwullType = TOK_NEQ; rwpcCur += 2; }
+        else if (rwpcCur[0] == '<' && rwpcCur[1] == '=') { rwptNode->rwullType = TOK_LE; rwpcCur += 2; }
+        else if (rwpcCur[0] == '>' && rwpcCur[1] == '=') { rwptNode->rwullType = TOK_GE; rwpcCur += 2; }
+        else if (rwpcCur[0] == '&' && rwpcCur[1] == '&') { rwptNode->rwullType = TOK_AND; rwpcCur += 2; }
+        else if (rwpcCur[0] == '|' && rwpcCur[1] == '|') { rwptNode->rwullType = TOK_OR; rwpcCur += 2; }
+        else if (rwpcCur[0] == '-' && rwpcCur[1] == '>') { rwptNode->rwullType = TOK_ARROW; rwpcCur += 2; }
+        else if (rwpcCur[0] == '<' && rwpcCur[1] == '<') { rwptNode->rwullType = TOK_SHL; rwpcCur += 2; }
+        else if (rwpcCur[0] == '>' && rwpcCur[1] == '>') { rwptNode->rwullType = TOK_SHR; rwpcCur += 2; }
+        else if (*rwpcCur == '<') { rwptNode->rwullType = TOK_LT; rwpcCur++; }
+        else if (*rwpcCur == '>') { rwptNode->rwullType = TOK_GT; rwpcCur++; }
+        else if (*rwpcCur == '!') { rwptNode->rwullType = TOK_NOT; rwpcCur++; }
+        else if (*rwpcCur == '&') { rwptNode->rwullType = TOK_AMP; rwpcCur++; }
+        else if (*rwpcCur == '+') { rwptNode->rwullType = TOK_PLUS; rwpcCur++; }
+        else if (*rwpcCur == '-') { rwptNode->rwullType = TOK_MINUS; rwpcCur++; }
+        else if (rwpcCur[0] == '*' && rwpcCur[1] == '*') { rwptNode->rwullType = TOK_POW; rwpcCur += 2; }
+        else if (*rwpcCur == '*') { rwptNode->rwullType = TOK_STAR; rwpcCur++; }
+        else if (*rwpcCur == '/') { rwptNode->rwullType = TOK_DIV; rwpcCur++; }
+        else if (*rwpcCur == '%') { rwptNode->rwullType = TOK_MOD; rwpcCur++; }
+        else if (*rwpcCur == '^') { rwptNode->rwullType = TOK_BITXOR; rwpcCur++; }
+        else if (*rwpcCur == '(') { rwptNode->rwullType = TOK_LPAREN; rwpcCur++; }
+        else if (*rwpcCur == ')') { rwptNode->rwullType = TOK_RPAREN; rwpcCur++; }
+        else if (*rwpcCur == '{') { rwptNode->rwullType = TOK_LBRACE; rwpcCur++; }
+        else if (*rwpcCur == '}') { rwptNode->rwullType = TOK_RBRACE; rwpcCur++; }
+        else if (*rwpcCur == '[') { rwptNode->rwullType = TOK_LBRACKET; rwpcCur++; }
+        else if (*rwpcCur == ']') { rwptNode->rwullType = TOK_RBRACKET; rwpcCur++; }
+        else if (*rwpcCur == ',') { rwptNode->rwullType = TOK_COMMA; rwpcCur++; }
+        else if (*rwpcCur == ';') { rwptNode->rwullType = TOK_SEMI; rwpcCur++; }
+        else if (*rwpcCur == ':') { rwptNode->rwullType = TOK_COLON; rwpcCur++; }
+        else if (*rwpcCur == '.') { rwptNode->rwullType = TOK_DOT; rwpcCur++; }
+        else if (*rwpcCur == '=') { rwptNode->rwullType = TOK_ASSIGN; rwpcCur++; }
+        else { free(rwptNode); rwpcCur++; continue; }
 
         TokenAppend(rwptrRoot, rwptNode);
     }
