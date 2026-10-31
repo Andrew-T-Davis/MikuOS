@@ -107,7 +107,9 @@ Func U0 InitIDT(){
 }
 
 Func Naked U0 Test(){
+    CLI;
     Print3F8("Int 0x0");HM_Out3F8(0xA);
+    STI;
     IRETQ;
 }
 

@@ -3,6 +3,7 @@
 #include "int.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 static Symbol* rwpsSymbols = NULL;
 static Reloc* rwprlRelocs = NULL;

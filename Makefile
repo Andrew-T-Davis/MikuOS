@@ -31,6 +31,14 @@ run: MikuOS.img
 		-vnc :1 \
 		-serial stdio
 
+run-pc: MikuOS.img
+	qemu-system-x86_64 \
+		-hda MikuOS.img \
+		-boot order=c \
+		-vga std \
+		-accel tcg,thread=multi \
+		-serial stdio
+
 clear:
 	rm -rf *.bin *.iso *.img
 
