@@ -1,6 +1,3 @@
-@Include "seed/Debug.hm"
-@Include "seed/Memory.hm"
-
 U8* VRAM = 0xA0000;
 U8* VGAFont = 0xFFA6E;
 
@@ -44,6 +41,8 @@ Func U0 KernelMain(){
     POPQ QDX;
     POPQ QAX;
     If (LoopTime>0) Goto Loop5TimeOut0;
+    
+    HM_Out3F8(0x30);
 
     VGAText("MikuOS v0.001",0,0,0b1001);
     VGAText("By Andrew T. Davis",0,8,0b1010);
@@ -62,9 +61,6 @@ Func U0 KernelMain(){
     Print3F8("RDTSC: 0x");Print32(RDTSC_HIGH);Print32(RDTSC_LOW);HM_Out3F8(0xA);
     
     Print3F8("0t1TT=0x");Print8(0t1TT);HM_Out3F8(0xA);
-    
-    PrintE820Map();
-    InitAllocer();
 
     Print3F8("Main While");HM_Out3F8(0xA);
     While (1){
@@ -278,3 +274,32 @@ Func U0 VGAText(U8* String, U16 X, U16 Y, U8 Color){
     Return;
 }
 
+Func U0 HM_OutB(U16 Port, U8 Value){
+    PUSHQ QDX;
+    PUSHQ QAX;
+    MOVW WDX, [Port];
+    MOVB BAL, [Value];
+    OUTB WDX, BAL;
+    POPQ QAX;
+    POPQ QDX;
+    Return;
+}
+
+Func U0 HM_Out3F8(U8 Value){
+    PUSHQ QAX;
+    PUSHQ QDX;
+    MOVW WDX, 0x3F8;
+    MOVB BAL, [Value];
+    OUTB WDX, BAL;
+    POPQ QDX;
+    POPQ QAX;
+    Return;
+}
+
+Func U0 Print3F8(U8* String){
+    While (*String) {
+        HM_Out3F8(*String);
+        String = String + 1;
+    }
+    Return;
+}

@@ -44,6 +44,7 @@ typedef struct LoopCtx {
 
 typedef struct AsmReloc {
     U64 rwullPos;
+    U64 rwullNext;
     char* rwszName;
     struct AsmReloc* rwparNext;
 } AsmReloc;
@@ -70,6 +71,7 @@ static void StrRelocAdd(U64 rwullPos, U64 rwullId) {
 static void AsmRelocAdd(U64 rwullPos, const char* rwszName) {
     AsmReloc* rwparAsmReloc = malloc(sizeof(AsmReloc));
     rwparAsmReloc->rwullPos = rwullPos;
+    rwparAsmReloc->rwullNext = 0;
     rwparAsmReloc->rwszName = strdup(rwszName);
     rwparAsmReloc->rwparNext = rwparAsmRelocs;
     rwparAsmRelocs = rwparAsmReloc;
@@ -643,7 +645,11 @@ static void ShiftRelocs(U64 rwullFrom, U64 rwullDelta) {
     LabelInfo* rwpliLabel = rwpliLabels;
     while (rwpliLabel) { if (rwpliLabel->rwullAddr >= rwullFrom) rwpliLabel->rwullAddr += rwullDelta; rwpliLabel = rwpliLabel->rwptNext; }
     AsmReloc* rwparAsmReloc = rwparAsmRelocs;
-    while (rwparAsmReloc) { if (rwparAsmReloc->rwullPos >= rwullFrom) rwparAsmReloc->rwullPos += rwullDelta; rwparAsmReloc = rwparAsmReloc->rwparNext; }
+    while (rwparAsmReloc) {
+        if (rwparAsmReloc->rwullPos >= rwullFrom) rwparAsmReloc->rwullPos += rwullDelta;
+        if (rwparAsmReloc->rwullNext >= rwullFrom) rwparAsmReloc->rwullNext += rwullDelta;
+        rwparAsmReloc = rwparAsmReloc->rwparNext;
+    }
 }
 
 static int AsmOpWidth(U64 rwullOp) {
@@ -813,21 +819,33 @@ static void AsmEmitRex(CodeBuf* rwpcbCodeBuf, int rwullW, int rwullR, int rwullX
     if (rwullRex != 0x40) E8(rwpcbCodeBuf, rwullRex);
 }
 
-static void AsmEmitMem(CodeBuf* rwpcbCodeBuf, int rwullRegField, AsmMemInfo* rwpmemMem, int rwullIs64) {
+static void AsmEmitMemEx(CodeBuf* rwpcbCodeBuf, int rwullRegField, AsmMemInfo* rwpmemMem, int rwullIs64, int rwullEmitRex) {
     int rwullRexR = (rwullRegField >> 3) & 1;
     int rwullRexX = 0;
     int rwullRexB = 0;
+    int rwullRipRelative = (rwpmemMem->rwullBaseReg == ASM_REG_QIP);
+
+    if (rwpmemMem->rwullBaseReg == ASM_REG_NONE && rwpmemMem->rwszDispName == NULL) {
+        fprintf(stderr, "NeuroASM: absolute memory addressing is disabled; use RIP-relative or base-register addressing\n");
+        exit(1);
+    }
+    if (rwullRipRelative && rwpmemMem->rwullIdxReg != ASM_REG_NONE) {
+        fprintf(stderr, "NeuroASM: RIP-relative addressing cannot use an index register; materialize the symbol address first\n");
+        exit(1);
+    }
+    if (rwullRipRelative && rwpmemMem->rwszDispName == NULL && !rwpmemMem->rwullHasDisp)
+        rwpmemMem->rwullHasDisp = 1;
 
     if (rwpmemMem->rwullIdxReg != ASM_REG_NONE && AsmRegNeedsRex(rwpmemMem->rwullIdxReg)) rwullRexX = 1;
     if (rwpmemMem->rwullBaseReg != ASM_REG_NONE && AsmRegNeedsRex(rwpmemMem->rwullBaseReg)) rwullRexB = 1;
 
-    AsmEmitRex(rwpcbCodeBuf, rwullIs64, rwullRexR, rwullRexX, rwullRexB);
+    if (rwullEmitRex) AsmEmitRex(rwpcbCodeBuf, rwullIs64, rwullRexR, rwullRexX, rwullRexB);
 
-    int rwullNeedSib = AsmMemNeedsSib(rwpmemMem);
-    int rwullNeedDisp32 = AsmMemNeedsDisp32(rwpmemMem);
+    int rwullNeedSib = rwullRipRelative ? 0 : AsmMemNeedsSib(rwpmemMem);
+    int rwullNeedDisp32 = (rwullRipRelative || AsmMemNeedsDisp32(rwpmemMem));
 
     U8 rwullMod;
-    if (rwpmemMem->rwullBaseReg == ASM_REG_NONE) {
+    if (rwpmemMem->rwullBaseReg == ASM_REG_NONE || rwullRipRelative) {
         rwullMod = 0;
     } else if (rwpmemMem->rwullHasDisp && rwpmemMem->rwullDisp != 0) {
         if (rwpmemMem->rwullDisp >= -128 && rwpmemMem->rwullDisp <= 127 && !rwullNeedDisp32)
@@ -858,7 +876,7 @@ static void AsmEmitMem(CodeBuf* rwpcbCodeBuf, int rwullRegField, AsmMemInfo* rwp
         AsmEncodeModRM(rwpcbCodeBuf, rwullMod, (U8)rwullRegField, rwullRm);
     }
 
-    if (rwullMod == 0 && rwpmemMem->rwullBaseReg == ASM_REG_NONE) {
+    if (rwullMod == 0 && (rwpmemMem->rwullBaseReg == ASM_REG_NONE || rwullRipRelative)) {
         if (rwpmemMem->rwszDispName) {
             U64 rwullPos = rwpcbCodeBuf->rwullSize;
             E32(rwpcbCodeBuf, 0);
@@ -873,6 +891,17 @@ static void AsmEmitMem(CodeBuf* rwpcbCodeBuf, int rwullRegField, AsmMemInfo* rwp
     }
 }
 
+static void AsmEmitMem(CodeBuf* rwpcbCodeBuf, int rwullRegField, AsmMemInfo* rwpmemMem, int rwullIs64) {
+    AsmEmitMemEx(rwpcbCodeBuf, rwullRegField, rwpmemMem, rwullIs64, 1);
+}
+
+static void AsmEmitMemRex(CodeBuf* rwpcbCodeBuf, int rwullRegField, AsmMemInfo* rwpmemMem, int rwullIs64) {
+    int rwullRexR = (rwullRegField >> 3) & 1;
+    int rwullRexX = rwpmemMem->rwullIdxReg != ASM_REG_NONE && AsmRegNeedsRex(rwpmemMem->rwullIdxReg);
+    int rwullRexB = rwpmemMem->rwullBaseReg != ASM_REG_NONE && AsmRegNeedsRex(rwpmemMem->rwullBaseReg);
+    AsmEmitRex(rwpcbCodeBuf, rwullIs64, rwullRexR, rwullRexX, rwullRexB);
+}
+
 static void AsmNodeToMem(AsmMemInfo* rwpmemMem, Node* rwpnNode) {
     memset(rwpmemMem, 0, sizeof(AsmMemInfo));
     rwpmemMem->rwullBaseReg = ASM_REG_NONE;
@@ -881,6 +910,7 @@ static void AsmNodeToMem(AsmMemInfo* rwpmemMem, Node* rwpnNode) {
 
     if (rwpnNode->rwullAsmReg != ASM_REG_NONE) {
         rwpmemMem->rwullBaseReg = rwpnNode->rwullAsmReg;
+        if (rwpnNode->rwullAsmReg == ASM_REG_QIP) rwpmemMem->rwullHasDisp = 1;
     } else if (rwpnNode->rwszName) {
         Symbol* rwpsSymbol = SymFindLocal(rwpnNode->rwszName);
         if (rwpsSymbol) {
@@ -901,6 +931,10 @@ static void AsmNodeToMem(AsmMemInfo* rwpmemMem, Node* rwpnNode) {
     }
 
     if (rwpnNode->rwpnLeft) {
+        if (rwpmemMem->rwszDispName) {
+            fprintf(stderr, "NeuroASM: global_symbol + index is not encodable with x86-64 RIP-relative addressing; use LEA into a base register first\n");
+            exit(1);
+        }
         if (rwpnNode->rwpnLeft->rwullAsmReg != ASM_REG_NONE) {
             rwpmemMem->rwullIdxReg = rwpnNode->rwpnLeft->rwullAsmReg;
         } else if (rwpnNode->rwpnLeft->rwszName) {
@@ -1014,18 +1048,22 @@ static void AsmEncodeMov(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnDst, Node
         AsmMemInfo rwpmemMem;
         AsmNodeToMem(&rwpmemMem, rwpnSrc);
         if (rwullWidth == 8) {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 1);
             E8(rwpcbCodeBuf, 0x8B);
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullDst), &rwpmemMem, 1);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 1, 0);
         } else if (rwullWidth == 4) {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, 0x8B);
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullDst), &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0, 0);
         } else if (rwullWidth == 2) {
             E8(rwpcbCodeBuf, 0x66);
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, 0x8B);
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullDst), &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0, 0);
         } else {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, 0x8A);
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullDst), &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0, 0);
         }
         if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
         return;
@@ -1036,18 +1074,22 @@ static void AsmEncodeMov(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnDst, Node
         AsmMemInfo rwpmemMem;
         AsmNodeToMem(&rwpmemMem, rwpnDst);
         if (rwullWidth == 8) {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 1);
             E8(rwpcbCodeBuf, 0x89);
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullSrc), &rwpmemMem, 1);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 1, 0);
         } else if (rwullWidth == 4) {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, 0x89);
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullSrc), &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 0, 0);
         } else if (rwullWidth == 2) {
             E8(rwpcbCodeBuf, 0x66);
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, 0x89);
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullSrc), &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 0, 0);
         } else {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, 0x88);
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullSrc), &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 0, 0);
         }
         if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
         return;
@@ -1058,21 +1100,25 @@ static void AsmEncodeMov(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnDst, Node
         AsmMemInfo rwpmemMem;
         AsmNodeToMem(&rwpmemMem, rwpnDst);
         if (rwullWidth == 8) {
+            AsmEmitMemRex(rwpcbCodeBuf, 0, &rwpmemMem, 1);
             E8(rwpcbCodeBuf, 0xC7);
-            AsmEmitMem(rwpcbCodeBuf, 0, &rwpmemMem, 1);
+            AsmEmitMemEx(rwpcbCodeBuf, 0, &rwpmemMem, 1, 0);
             E32(rwpcbCodeBuf, (U32)(S32)rwullImm);
         } else if (rwullWidth == 4) {
+            AsmEmitMemRex(rwpcbCodeBuf, 0, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, 0xC7);
-            AsmEmitMem(rwpcbCodeBuf, 0, &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, 0, &rwpmemMem, 0, 0);
             E32(rwpcbCodeBuf, (U32)rwullImm);
         } else if (rwullWidth == 2) {
             E8(rwpcbCodeBuf, 0x66);
+            AsmEmitMemRex(rwpcbCodeBuf, 0, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, 0xC7);
-            AsmEmitMem(rwpcbCodeBuf, 0, &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, 0, &rwpmemMem, 0, 0);
             E16(rwpcbCodeBuf, (U16)rwullImm);
         } else {
+            AsmEmitMemRex(rwpcbCodeBuf, 0, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, 0xC6);
-            AsmEmitMem(rwpcbCodeBuf, 0, &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, 0, &rwpmemMem, 0, 0);
             E8(rwpcbCodeBuf, (U8)rwullImm);
         }
         if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
@@ -1138,18 +1184,22 @@ static void AsmEncodeAlu(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnDst, Node
         AsmMemInfo rwpmemMem;
         AsmNodeToMem(&rwpmemMem, rwpnSrc);
         if (rwullWidth == 8) {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 1);
             E8(rwpcbCodeBuf, (U8)(0x03 | (rwullAluOp << 3)));
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullDst), &rwpmemMem, 1);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 1, 0);
         } else if (rwullWidth == 4) {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, (U8)(0x03 | (rwullAluOp << 3)));
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullDst), &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0, 0);
         } else if (rwullWidth == 2) {
             E8(rwpcbCodeBuf, 0x66);
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, (U8)(0x03 | (rwullAluOp << 3)));
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullDst), &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0, 0);
         } else {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, (U8)(0x02 | (rwullAluOp << 3)));
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullDst), &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0, 0);
         }
         if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
         return;
@@ -1160,18 +1210,22 @@ static void AsmEncodeAlu(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnDst, Node
         AsmMemInfo rwpmemMem;
         AsmNodeToMem(&rwpmemMem, rwpnDst);
         if (rwullWidth == 8) {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 1);
             E8(rwpcbCodeBuf, (U8)(0x01 | (rwullAluOp << 3)));
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullSrc), &rwpmemMem, 1);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 1, 0);
         } else if (rwullWidth == 4) {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, (U8)(0x01 | (rwullAluOp << 3)));
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullSrc), &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 0, 0);
         } else if (rwullWidth == 2) {
             E8(rwpcbCodeBuf, 0x66);
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, (U8)(0x01 | (rwullAluOp << 3)));
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullSrc), &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 0, 0);
         } else {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, (U8)(0x00 | (rwullAluOp << 3)));
-            AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullSrc), &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullSrc, &rwpmemMem, 0, 0);
         }
         if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
         return;
@@ -1263,18 +1317,22 @@ static void AsmEncodeUnary(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnDst) {
         AsmMemInfo rwpmemMem;
         AsmNodeToMem(&rwpmemMem, rwpnDst);
         if (rwullWidth == 8) {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullExt, &rwpmemMem, 1);
             E8(rwpcbCodeBuf, 0xF7);
-            AsmEmitMem(rwpcbCodeBuf, (int)rwullExt, &rwpmemMem, 1);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullExt, &rwpmemMem, 1, 0);
         } else if (rwullWidth == 4) {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullExt, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, 0xF7);
-            AsmEmitMem(rwpcbCodeBuf, (int)rwullExt, &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullExt, &rwpmemMem, 0, 0);
         } else if (rwullWidth == 2) {
             E8(rwpcbCodeBuf, 0x66);
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullExt, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, 0xF7);
-            AsmEmitMem(rwpcbCodeBuf, (int)rwullExt, &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullExt, &rwpmemMem, 0, 0);
         } else {
+            AsmEmitMemRex(rwpcbCodeBuf, (int)rwullExt, &rwpmemMem, 0);
             E8(rwpcbCodeBuf, 0xF6);
-            AsmEmitMem(rwpcbCodeBuf, (int)rwullExt, &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, (int)rwullExt, &rwpmemMem, 0, 0);
         }
         if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
     }
@@ -1291,8 +1349,9 @@ static void AsmEncodePushPop(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnDst) 
     if (rwpnDst->rwullType == NODE_ASM_MEM) {
         AsmMemInfo rwpmemMem;
         AsmNodeToMem(&rwpmemMem, rwpnDst);
+        AsmEmitMemRex(rwpcbCodeBuf, rwullIsPush ? 6 : 0, &rwpmemMem, 0);
         E8(rwpcbCodeBuf, (U8)(rwullIsPush ? 0xFF : 0x8F));
-        AsmEmitMem(rwpcbCodeBuf, rwullIsPush ? 6 : 0, &rwpmemMem, 0);
+        AsmEmitMemEx(rwpcbCodeBuf, rwullIsPush ? 6 : 0, &rwpmemMem, 0, 0);
         if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
     }
 }
@@ -1302,16 +1361,21 @@ static void AsmEncodeLea(CodeBuf* rwpcbCodeBuf, Node* rwpnDst, Node* rwpnSrc) {
     U64 rwullDst = rwpnDst->rwullAsmReg;
     AsmMemInfo rwpmemMem;
     AsmNodeToMem(&rwpmemMem, rwpnSrc);
+    AsmEmitMemRex(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 1);
     E8(rwpcbCodeBuf, 0x8D);
-    AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullDst), &rwpmemMem, 1);
+    AsmEmitMemEx(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 1, 0);
     if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
 }
 
 static void AsmEncodeJmp(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnDst) {
     if (rwullOp == ASM_OP_JECXZ || rwullOp == ASM_OP_JRCXZ) {
+        if (rwpnDst->rwullType != NODE_ASM_LABEL && rwpnDst->rwullType != NODE_ASM_IMM) {
+            fprintf(stderr, "NeuroASM: JECXZ/JRCXZ requires a relative label or displacement\n");
+            exit(1);
+        }
         if (rwullOp == ASM_OP_JRCXZ) E8(rwpcbCodeBuf, 0x48);
         E8(rwpcbCodeBuf, 0xE3);
-        if (rwpnDst->rwullType == NODE_ASM_LABEL || (rwpnDst->rwullType == NODE_ASM_MEM && rwpnDst->rwszName)) {
+        if (rwpnDst->rwullType == NODE_ASM_LABEL) {
             U64 rwullPos = rwpcbCodeBuf->rwullSize;
             E8(rwpcbCodeBuf, 0);
             LabelRelocAdd(rwullPos, rwpnDst->rwszName);
@@ -1321,7 +1385,7 @@ static void AsmEncodeJmp(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnDst) {
         return;
     }
 
-    if (rwpnDst->rwullType == NODE_ASM_LABEL || (rwpnDst->rwullType == NODE_ASM_MEM && rwpnDst->rwszName)) {
+    if (rwpnDst->rwullType == NODE_ASM_LABEL) {
         const char* rwszLabel = rwpnDst->rwszName;
         if (rwullOp == ASM_OP_JMP) {
             E8(rwpcbCodeBuf, 0xE9);
@@ -1347,8 +1411,9 @@ static void AsmEncodeJmp(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnDst) {
     if (rwpnDst->rwullType == NODE_ASM_MEM) {
         AsmMemInfo rwpmemMem;
         AsmNodeToMem(&rwpmemMem, rwpnDst);
+        AsmEmitMemRex(rwpcbCodeBuf, 4, &rwpmemMem, 0);
         E8(rwpcbCodeBuf, 0xFF);
-        AsmEmitMem(rwpcbCodeBuf, 4, &rwpmemMem, 0);
+        AsmEmitMemEx(rwpcbCodeBuf, 4, &rwpmemMem, 0, 0);
         if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
     }
 }
@@ -1376,8 +1441,9 @@ static void AsmEncodeCall(CodeBuf* rwpcbCodeBuf, Node* rwpnDst) {
     if (rwpnDst->rwullType == NODE_ASM_MEM) {
         AsmMemInfo rwpmemMem;
         AsmNodeToMem(&rwpmemMem, rwpnDst);
+        AsmEmitMemRex(rwpcbCodeBuf, 2, &rwpmemMem, 0);
         E8(rwpcbCodeBuf, 0xFF);
-        AsmEmitMem(rwpcbCodeBuf, 2, &rwpmemMem, 0);
+        AsmEmitMemEx(rwpcbCodeBuf, 2, &rwpmemMem, 0, 0);
         if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
     }
 }
@@ -1492,9 +1558,10 @@ static void AsmEncodeSse(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnArg0, Nod
         U64 rwullDst = rwpnArg0->rwullAsmReg;
         AsmMemInfo rwpmemMem;
         AsmNodeToMem(&rwpmemMem, rwpnArg1);
+        AsmEmitMemRex(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0);
         E8(rwpcbCodeBuf, 0x0F);
         E8(rwpcbCodeBuf, rwullOpcode);
-        AsmEmitMem(rwpcbCodeBuf, (int)AsmRegLow3(rwullDst), &rwpmemMem, 0);
+        AsmEmitMemEx(rwpcbCodeBuf, (int)rwullDst, &rwpmemMem, 0, 0);
         if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
     }
 }
@@ -1555,9 +1622,9 @@ static void AsmEncodeAvx(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnArg0, Nod
     if (rwpnArg1->rwullType == NODE_ASM_REG) {
         rwullVVVV = (U8)(15 - AsmRegLow3(rwpnArg1->rwullAsmReg));
     }
-    if (rwpnArg1->rwullType == NODE_ASM_MEM) {
+    if (rwpnArg2 && rwpnArg2->rwullType == NODE_ASM_MEM) {
         AsmMemInfo rwpmemMem;
-        AsmNodeToMem(&rwpmemMem, rwpnArg1);
+        AsmNodeToMem(&rwpmemMem, rwpnArg2);
         if (rwpmemMem.rwullBaseReg != ASM_REG_NONE) rwullB = AsmRegNeedsRex(rwpmemMem.rwullBaseReg);
         if (rwpmemMem.rwullIdxReg != ASM_REG_NONE) rwullX = AsmRegNeedsRex(rwpmemMem.rwullIdxReg);
     }
@@ -1581,7 +1648,7 @@ static void AsmEncodeAvx(CodeBuf* rwpcbCodeBuf, U64 rwullOp, Node* rwpnArg0, Nod
     }
 }
 
-static void AsmEncode(CodeBuf* rwpcbCodeBuf, Node* rwpnAsm) {
+static void AsmEncodeInner(CodeBuf* rwpcbCodeBuf, Node* rwpnAsm) {
     U64 rwullOp = rwpnAsm->rwullAsmOp;
     Node* rwpnArg0 = rwpnAsm->rwpnArgs;
     Node* rwpnArg1 = rwpnArg0 ? rwpnArg0->rwpnNext : NULL;
@@ -1649,19 +1716,23 @@ static void AsmEncode(CodeBuf* rwpcbCodeBuf, Node* rwpnAsm) {
     }
 
     if (rwullOp == ASM_OP_LGDT || rwullOp == ASM_OP_LIDT || rwullOp == ASM_OP_SGDT || rwullOp == ASM_OP_SIDT) {
+        AsmMemInfo rwpmemMem;
+        AsmNodeToMem(&rwpmemMem, rwpnArg0);
+        AsmEmitMemRex(rwpcbCodeBuf, 0, &rwpmemMem, 0);
         E8(rwpcbCodeBuf, 0x0F); E8(rwpcbCodeBuf, 0x01);
         U8 rwullExt;
         if (rwullOp == ASM_OP_SGDT) rwullExt = 0;
         else if (rwullOp == ASM_OP_SIDT) rwullExt = 1;
         else if (rwullOp == ASM_OP_LGDT) rwullExt = 2;
         else rwullExt = 3;
-        AsmMemInfo rwpmemMem;
-        AsmNodeToMem(&rwpmemMem, rwpnArg0);
-        AsmEmitMem(rwpcbCodeBuf, rwullExt, &rwpmemMem, 0);
+        AsmEmitMemEx(rwpcbCodeBuf, rwullExt, &rwpmemMem, 0, 0);
         if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
         return;
     }
     if (rwullOp == ASM_OP_LLDT || rwullOp == ASM_OP_LTR || rwullOp == ASM_OP_SLDT || rwullOp == ASM_OP_STR) {
+        AsmMemInfo rwpmemMem;
+        int rwullHasMem = (rwpnArg0->rwullType == NODE_ASM_MEM);
+        if (rwullHasMem) { AsmNodeToMem(&rwpmemMem, rwpnArg0); AsmEmitMemRex(rwpcbCodeBuf, 0, &rwpmemMem, 0); }
         E8(rwpcbCodeBuf, 0x0F); E8(rwpcbCodeBuf, 0x00);
         U8 rwullExt;
         if (rwullOp == ASM_OP_SLDT) rwullExt = 0;
@@ -1671,18 +1742,17 @@ static void AsmEncode(CodeBuf* rwpcbCodeBuf, Node* rwpnAsm) {
         if (rwpnArg0->rwullType == NODE_ASM_REG) {
             E8(rwpcbCodeBuf, (U8)((3 << 6) | (rwullExt << 3) | (AsmRegLow3(rwpnArg0->rwullAsmReg) & 7)));
         } else if (rwpnArg0->rwullType == NODE_ASM_MEM) {
-            AsmMemInfo rwpmemMem;
-            AsmNodeToMem(&rwpmemMem, rwpnArg0);
-            AsmEmitMem(rwpcbCodeBuf, rwullExt, &rwpmemMem, 0);
+            AsmEmitMemEx(rwpcbCodeBuf, rwullExt, &rwpmemMem, 0, 0);
             if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
         }
         return;
     }
     if (rwullOp == ASM_OP_INVLPG) {
-        E8(rwpcbCodeBuf, 0x0F); E8(rwpcbCodeBuf, 0x01);
         AsmMemInfo rwpmemMem;
         AsmNodeToMem(&rwpmemMem, rwpnArg0);
-        AsmEmitMem(rwpcbCodeBuf, 7, &rwpmemMem, 0);
+        AsmEmitMemRex(rwpcbCodeBuf, 7, &rwpmemMem, 0);
+        E8(rwpcbCodeBuf, 0x0F); E8(rwpcbCodeBuf, 0x01);
+        AsmEmitMemEx(rwpcbCodeBuf, 7, &rwpmemMem, 0, 0);
         if (rwpmemMem.rwszDispName) free(rwpmemMem.rwszDispName);
         return;
     }
@@ -1726,6 +1796,13 @@ static void AsmEncode(CodeBuf* rwpcbCodeBuf, Node* rwpnAsm) {
     if (AsmOpIsShift(rwullOp)) { AsmEncodeShift(rwpcbCodeBuf, rwullOp, rwpnArg0, rwpnArg1); return; }
     if (AsmOpIsUnary(rwullOp)) { AsmEncodeUnary(rwpcbCodeBuf, rwullOp, rwpnArg0); return; }
     if (AsmOpIsPush(rwullOp) || AsmOpIsPop(rwullOp)) { AsmEncodePushPop(rwpcbCodeBuf, rwullOp, rwpnArg0); return; }
+}
+
+static void AsmEncode(CodeBuf* rwpcbCodeBuf, Node* rwpnAsm) {
+    AsmReloc* rwparOldHead = rwparAsmRelocs;
+    AsmEncodeInner(rwpcbCodeBuf, rwpnAsm);
+    for (AsmReloc* rwparReloc = rwparAsmRelocs; rwparReloc && rwparReloc != rwparOldHead; rwparReloc = rwparReloc->rwparNext)
+        rwparReloc->rwullNext = rwpcbCodeBuf->rwullSize;
 }
 
 static void NakedCheckNoLocalDecl(Node* rwpnBody, const char* rwszFuncName) {
@@ -1916,23 +1993,23 @@ static void GenNode(CodeBuf* rwpcbCodeBuf, Node* rwpnNode) {
             break;
         }
 
-        case NODE_VAR: {
-            Symbol* rwpsSymbol = SymFindLocal(rwpnNode->rwszName);
-            if (!rwpsSymbol) rwpsSymbol = SymFindGlobal(rwpnNode->rwszName);
-            if (!rwpsSymbol) { MovRaxImm(rwpcbCodeBuf, 0); break; }
+    case NODE_VAR: {
+        Symbol* rwpsSymbol = SymFindLocal(rwpnNode->rwszName);
+        if (!rwpsSymbol) rwpsSymbol = SymFindGlobal(rwpnNode->rwszName);
+        if (!rwpsSymbol) { MovRaxImm(rwpcbCodeBuf, 0); break; }
 
-            if (rwpsSymbol->rwullPtrDepth > 0) {
-                GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
-                GenLoad(rwpcbCodeBuf, 8, 0);
-            } else if (rwpsSymbol->rwullArraySize || rwpsSymbol->rwullStructId) {
-                GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
-            } else {
-                GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
-                U64 rwullSz = SymbolElemSize(rwpsSymbol);
-                GenLoad(rwpcbCodeBuf, rwullSz, TypeSigned(rwpsSymbol->rwullVarType));
-            }
-            break;
+        if (rwpsSymbol->rwullPtrDepth > 0) {
+            GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
+            GenLoad(rwpcbCodeBuf, 8, 0);
+        } else if (rwpsSymbol->rwullArraySize || rwpsSymbol->rwullStructId) {
+            GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
+        } else {
+            GenVarAddr(rwpcbCodeBuf, rwpsSymbol);
+            U64 rwullSz = SymbolElemSize(rwpsSymbol);
+            GenLoad(rwpcbCodeBuf, rwullSz, TypeSigned(rwpsSymbol->rwullVarType));
         }
+        break;
+    }
 
         case NODE_ASSIGN: {
             if (NodeIsStructByValue(rwpnNode->rwpnLeft) && rwpnNode->rwpnRight) {
@@ -2365,11 +2442,6 @@ static void GenNode(CodeBuf* rwpcbCodeBuf, Node* rwpnNode) {
             GenNode(rwpcbCodeBuf, rwpnNode->rwpnRight); PopRcx(rwpcbCodeBuf);
             E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x31); E8(rwpcbCodeBuf, 0xC8);
             break;
-        case NODE_BITAND:
-            GenNode(rwpcbCodeBuf, rwpnNode->rwpnLeft); PushRax(rwpcbCodeBuf);
-            GenNode(rwpcbCodeBuf, rwpnNode->rwpnRight); PopRcx(rwpcbCodeBuf);
-            E8(rwpcbCodeBuf, 0x48); E8(rwpcbCodeBuf, 0x21); E8(rwpcbCodeBuf, 0xC8);
-            break;
 
         default: break;
     }
@@ -2430,10 +2502,10 @@ CodeBuf* AstToCode(Node* rwpnRoot) {
         Symbol* rwpsSymbol = SymFindGlobal(rwparAsmReloc->rwszName);
         FuncInfo* rwpfiFunc = FuncFind(rwparAsmReloc->rwszName);
         if (rwpsSymbol && rwpsSymbol->rwullIsGlobal) {
-            S32 rwullD = (S32)((S64)(rwullGlobalStart + rwpsSymbol->rwullGlobalAddr) - (S64)(rwparAsmReloc->rwullPos + 4));
+            S32 rwullD = (S32)((S64)(rwullGlobalStart + rwpsSymbol->rwullGlobalAddr) - (S64)(rwparAsmReloc->rwullNext ? rwparAsmReloc->rwullNext : (rwparAsmReloc->rwullPos + 4)));
             memcpy(rwpcbCodeBuf->rwpData + rwparAsmReloc->rwullPos, &rwullD, 4);
         } else if (rwpfiFunc) {
-            S32 rwullD = (S32)((S64)rwpfiFunc->rwullAddr - (S64)(rwparAsmReloc->rwullPos + 4));
+            S32 rwullD = (S32)((S64)rwpfiFunc->rwullAddr - (S64)(rwparAsmReloc->rwullNext ? rwparAsmReloc->rwullNext : (rwparAsmReloc->rwullPos + 4)));
             memcpy(rwpcbCodeBuf->rwpData + rwparAsmReloc->rwullPos, &rwullD, 4);
         }
         rwparAsmReloc = rwparAsmReloc->rwparNext;
