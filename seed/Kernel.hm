@@ -58,13 +58,14 @@ Func U0 KernelMain(){
     POPD DAX;
     MOVD [RDTSC_LOW],DAX;
     MOVD [RDTSC_HIGH],DDX;
-    Print3F8("RDTSC: 0x");Print32(RDTSC_HIGH);Print32(RDTSC_LOW);HM_Out3F8(0xA);
-    
-    Print3F8("0t1TT=0x");Print8(0t1TT);HM_Out3F8(0xA);
+    VGAText("Main While",0,24,0b0011);
+    VGAText("A", 0, 0, 0x0F);
+    VGAText("B", 8, 0, 0x0F);
+    VGAText("C", 16, 0, 0x0F);
 
     Print3F8("Main While");HM_Out3F8(0xA);
     While (1){
-        VGARectFill(0,0,640,480,0b0011);
+        PAUSE;
     }
     Return;
 }
@@ -230,10 +231,12 @@ Func U0 VGARect(U16 X, U16 Y, U16 W, U16 H, U8 Color){
     Return;
 }
 
-
 Func U0 VGAText(U8* String, U16 X, U16 Y, U8 Color){
     VGA_SetGC(0x00, Color);
     VGA_SetGC(0x01, 0x0F);
+    VGA_SetGC(0x03, 0x00);
+    VGA_SetGC(0x05, 0x00);
+    VGA_SetGC(0x08, 0xFF);
 
     While(*String){
         U8* CharROM = 0xFFA6E + ((*String) * 8);
@@ -243,7 +246,7 @@ Func U0 VGAText(U8* String, U16 X, U16 Y, U8 Color){
         U8  BitShift = X & 7;
 
         While(Row < 8){
-            U16 BaseOffset = ((Y + Row) * 80) + ByteX;
+            U16 BaseOffset = ((Y + Row) * 80) + ByteX - 1;
             U8 Pattern = CharROM[Row];
 
             U8 Mask1 = Pattern >> BitShift;

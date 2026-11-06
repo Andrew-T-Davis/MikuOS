@@ -14,7 +14,8 @@ struct Symbol {
     char* rwszName;
     U64 rwullVarType;
     U64 rwullPtrDepth;
-    U64 rwullArraySize;
+    U64 rwullArrayDims[8];
+    U64 rwullArrayDimCount;
     U64 rwullOffset;
     U64 rwullIsParam;
     U64 rwullIsGlobal;
@@ -56,7 +57,8 @@ struct StructField {
     char* rwszName;
     U64 rwullVarType;
     U64 rwullPtrDepth;
-    U64 rwullArraySize;
+    U64 rwullArrayDims[8];
+    U64 rwullArrayDimCount;
     U64 rwullOffset;
     U64 rwullStructId;
     char* rwszStructName;

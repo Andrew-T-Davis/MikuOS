@@ -24,7 +24,8 @@ struct Node {
     U64 rwullValue;
     U64 rwullVarType;
     U64 rwullPtrDepth;
-    U64 rwullArraySize;
+    U64 rwullArrayDims[8];
+    U64 rwullArrayDimCount;
     U64 rwullAsmOp;
     U64 rwullAsmReg;
     U64 rwullAsmScale;

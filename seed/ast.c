@@ -382,10 +382,11 @@ static Node* ParseDecl(void) {
     rwpnNode->rwszStructName = rwszStructName;
     rwpnNode->rwpnThird = rwpnInlineDef;
 
-    if (rwptCur && rwptCur->rwullType == TOK_LBRACKET) {
+    while (rwptCur && rwptCur->rwullType == TOK_LBRACKET) {
         rwptCur = rwptCur->rwptNext;
         if (rwptCur && rwptCur->rwullType == TOK_NUM) {
-            rwpnNode->rwullArraySize = rwptCur->rwullValue;
+            if (rwpnNode->rwullArrayDimCount < 8)
+                rwpnNode->rwullArrayDims[rwpnNode->rwullArrayDimCount++] = rwptCur->rwullValue;
             rwptCur = rwptCur->rwptNext;
         }
         if (rwptCur && rwptCur->rwullType == TOK_RBRACKET) rwptCur = rwptCur->rwptNext;
@@ -424,10 +425,11 @@ static Node* ParseAggregateDef(U64 rwullNodeType) {
         rwpnField->rwullStructId = rwullStructId;
         rwpnField->rwszStructName = rwszFieldStructName;
         rwpnField->rwpnThird = rwpnInlineDef;
-        if (rwptCur && rwptCur->rwullType == TOK_LBRACKET) {
+        while (rwptCur && rwptCur->rwullType == TOK_LBRACKET) {
             rwptCur = rwptCur->rwptNext;
             if (rwptCur && rwptCur->rwullType == TOK_NUM) {
-                rwpnField->rwullArraySize = rwptCur->rwullValue;
+                if (rwpnField->rwullArrayDimCount < 8)
+                    rwpnField->rwullArrayDims[rwpnField->rwullArrayDimCount++] = rwptCur->rwullValue;
                 rwptCur = rwptCur->rwptNext;
             }
             if (rwptCur && rwptCur->rwullType == TOK_RBRACKET) rwptCur = rwptCur->rwptNext;
@@ -560,7 +562,17 @@ static Node* ParseFunc(void) {
                 rwpnP->rwullStructId = rwullSid;
                 rwpnP->rwszStructName = rwszSname;
                 rwpnP->rwpnThird = rwpnInline;
-                if (!rwpnTail) rwpnNode->rwpnArgs = rwpnP; else rwpnTail->rwpnNext = rwpnP;
+                while (rwptCur && rwptCur->rwullType == TOK_LBRACKET) {
+                    rwptCur = rwptCur->rwptNext;
+                    if (rwptCur && rwptCur->rwullType == TOK_NUM) {
+                        if (rwpnP->rwullArrayDimCount < 8)
+                            rwpnP->rwullArrayDims[rwpnP->rwullArrayDimCount++] = rwptCur->rwullValue;
+                        rwptCur = rwptCur->rwptNext;
+                    }
+                    if (rwptCur && rwptCur->rwullType == TOK_RBRACKET) rwptCur = rwptCur->rwptNext;
+                }
+                if (!rwpnTail) rwpnNode->rwpnArgs = rwpnP;
+                else rwpnTail->rwpnNext = rwpnP;
                 rwpnTail = rwpnP;
             }
             if (rwptCur && rwptCur->rwullType == TOK_COMMA) rwptCur = rwptCur->rwptNext;
@@ -859,13 +871,13 @@ void AstPrint(Node* rwpnRoot, int rwullDepth) {
         case NODE_POW: printf("POW\n"); break;
         case NODE_NEG: printf("NEG\n"); break;
         case NODE_POS: printf("POS\n"); break;
-        case NODE_DECL: printf("DECL(t=%llu,p=%llu,s=%llu,sn=%s,n=%s,sz=%llu)\n",
+        case NODE_DECL: printf("DECL(t=%llu,p=%llu,s=%llu,sn=%s,n=%s,dims=%llu)\n",
             (unsigned long long)rwpnRoot->rwullVarType,
             (unsigned long long)rwpnRoot->rwullPtrDepth,
             (unsigned long long)rwpnRoot->rwullStructId,
             rwpnRoot->rwszStructName ? rwpnRoot->rwszStructName : "-",
             rwpnRoot->rwszName,
-            (unsigned long long)rwpnRoot->rwullArraySize); break;
+            (unsigned long long)rwpnRoot->rwullArrayDimCount); break;
         case NODE_VAR: printf("VAR(%s)\n", rwpnRoot->rwszName); break;
         case NODE_ASSIGN:
             if (rwpnRoot->rwszName) printf("ASSIGN(%s)\n", rwpnRoot->rwszName);
@@ -917,13 +929,13 @@ void AstPrint(Node* rwpnRoot, int rwullDepth) {
         case NODE_ASM_LABEL: printf("ASM_LABEL(%s)\n", rwpnRoot->rwszName); break;
         case NODE_STRUCT_DEF: printf("STRUCT_DEF(%s)\n", rwpnRoot->rwszName); break;
         case NODE_UNION_DEF: printf("UNION_DEF(%s)\n", rwpnRoot->rwszName); break;
-        case NODE_STRUCT_FIELD: printf("FIELD(t=%llu,p=%llu,s=%llu,sn=%s,n=%s,sz=%llu)\n",
+        case NODE_STRUCT_FIELD: printf("FIELD(t=%llu,p=%llu,s=%llu,sn=%s,n=%s,dims=%llu)\n",
             (unsigned long long)rwpnRoot->rwullVarType,
             (unsigned long long)rwpnRoot->rwullPtrDepth,
             (unsigned long long)rwpnRoot->rwullStructId,
             rwpnRoot->rwszStructName ? rwpnRoot->rwszStructName : "-",
             rwpnRoot->rwszName,
-            (unsigned long long)rwpnRoot->rwullArraySize); break;
+            (unsigned long long)rwpnRoot->rwullArrayDimCount); break;
         case NODE_STRUCT_ACCESS: printf("STRUCT_ACCESS(.%s)\n", rwpnRoot->rwszName); break;
         case NODE_STRUCT_PTR_ACCESS: printf("STRUCT_PTR_ACCESS(->%s)\n", rwpnRoot->rwszName); break;
         case NODE_SIZEOF: printf("SIZEOF(%s)\n", rwpnRoot->rwszName); break;
@@ -933,13 +945,13 @@ void AstPrint(Node* rwpnRoot, int rwullDepth) {
         Node* rwpnP = rwpnRoot->rwpnArgs;
         while (rwpnP) {
             for (int i = 0; i <= rwullDepth; i++) printf("  ");
-            printf("DECL(t=%llu,p=%llu,s=%llu,sn=%s,n=%s,sz=%llu)\n",
+            printf("DECL(t=%llu,p=%llu,s=%llu,sn=%s,n=%s,dims=%llu)\n",
                 (unsigned long long)rwpnP->rwullVarType,
                 (unsigned long long)rwpnP->rwullPtrDepth,
                 (unsigned long long)rwpnP->rwullStructId,
                 rwpnP->rwszStructName ? rwpnP->rwszStructName : "-",
                 rwpnP->rwszName,
-                (unsigned long long)rwpnP->rwullArraySize);
+                (unsigned long long)rwpnP->rwullArrayDimCount);
             rwpnP = rwpnP->rwpnNext;
         }
         AstPrint(rwpnRoot->rwpnLeft, rwullDepth + 1);
